@@ -76,14 +76,19 @@ static void *listener(void *arg)
 
 	switch (m->type) {
 	case DFS_MSG_PUSH_LOG:
-
-	    // write me
-
+	    /* Lock tree and replay log.  Assumes we get the whole log.  */
+	    playLog(m->data, m->len);
 	    break;
+
 	case MSG_REPLY:
-
-	    // write me
-
+	    /* Put on reply queue.  Waits until main thread gets the item
+	     and sets the replyQueue to NULL to prevent losing messages */
+	    pthread_mutex_lock(&replyLogserverMut);
+	    assert(replyQueue == NULL);
+	    replyQueue = m;
+	    pthread_cond_signal(&replyLogserverCond);
+	    pthread_cond_wait(&replyLogserverCond, &replyLogserverMut);
+	    pthread_mutex_unlock(&replyLogserverMut);
 	    break;
 	default:
 	    dfs_die("BAD MSG TYPE %d\n", m->type);
@@ -613,7 +618,6 @@ static void init(char *sname, int sport, char *xname, int xport)
     if (!(extentSock = comm_client_socket(xname, xport))) 
 	dfs_die("NO setup client socket to extent server at %d on '%s'\n", xport, xname);
 
-    /*
     if (sname && ((opLog.net_fd = comm_client_socket(sname, sport)) > 0)) {
 	// create a new thread reading this socket
 	pthread_t		tid;
@@ -633,7 +637,6 @@ static void init(char *sname, int sport, char *xname, int xport)
 	    free(reply);
 	}
     }
-    */
 }
 
 

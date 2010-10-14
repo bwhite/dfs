@@ -383,18 +383,30 @@ Msg *comm_send_and_reply(int sock, int type, ...)
     return comm_read(sock);
 }
 
-
-// Student-created
-Msg 	*comm_send_and_reply_mutex(pthread_mutex_t *mut, pthread_cond_t *cond, int sock, int type, ...)
+Msg *comm_send_and_reply_mutex(pthread_mutex_t *mut, pthread_cond_t *cond, int sock, int type, ...)
 {
-    //wontcompile
+    //willcompile
 
     // Same as above, except that the reply will be read by the
     // listener thread and dumped on 'replyQueue', where you will grab
     // it. Synchornization between listener thread and  this routine
     // is through the mutex and cond variable parameters.
+    va_list		ap;
+    Msg *reply;
 
+    va_start(ap, type);
+    int	res = comm_send_prim(sock, type, 0, sequenceNumber++, ap);
+    va_end(ap);
 
-    return 0;//reply;
+    if (res < 0) return NULL;
+
+    pthread_mutex_lock(&replyLogserverMut);
+    pthread_cond_wait(&replyLogserverCond, &replyLogserverMut);
+    reply = replyQueue;
+    replyQueue = NULL;
+    pthread_mutex_unlock(&replyLogserverMut);
+    pthread_cond_signal(&replyLogserverCond);
+
+    return reply;
 }
 

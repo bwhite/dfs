@@ -73,7 +73,12 @@ void pushLog(char *from, long len)
 	fwrite(opLog.data, opLog.used, 1, o);
 	fclose(o);
     }
-
+    {
+	Msg *reply = comm_send_and_reply(opLog.net_fd, DFS_MSG_PUSH_LOG, from, len, NULL);
+	// TODO If log server gives us any a new log, then we need to replay it
+	// for now we are assuming that we will get the whole log
+	free(reply);
+    }
 }
 
 
@@ -124,4 +129,6 @@ void logOther(int type, const char *path, int flags, struct stat *stat)
 // called to reply records from logs returned from server
 void playLog(char *buf, int len)
 {
+    pthread_mutex_lock(&replyLogserverMut);
+    pthread_mutex_unlock(&replyLogserverMut);
 }
