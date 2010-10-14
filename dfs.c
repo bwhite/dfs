@@ -57,9 +57,9 @@ static void			*pathRoot;
 
 DfsFile 			*root;
 static int			debug = 1;
-
-pthread_mutex_t			replyLogserverMut = PTHREAD_MUTEX_INITIALIZER;
-pthread_cond_t			replyLogserverCond = PTHREAD_COND_INITIALIZER;
+extern pthread_mutex_t replyLogserverMut;
+extern pthread_cond_t replyLogserverCond;
+pthread_mutex_t treeMut;
 extern Msg			*replyQueue;
 
 
@@ -152,7 +152,7 @@ static void freeNode(const char *path, DfsFile *f) {
 		assert(p->num_children);
 		dfs_out("memcpy %x, %x, %d (i %d #%d)\n", (void *)&p->child[i], (void *)&p->child[i+1], 
 		   sizeof(DfsFile *) * (p->num_children - (i+1)), i, p->num_children);
-		memcpy((void *)&p->child[i], (void *)&p->child[i+1], sizeof(DfsFile *) * (p->num_children - (i+1)));
+		memmove((void *)&p->child[i], (void *)&p->child[i+1], sizeof(DfsFile *) * (p->num_children - (i+1)));
 		break;
 	    }
 	}
@@ -160,6 +160,17 @@ static void freeNode(const char *path, DfsFile *f) {
 	p->num_children--;
     }
     free(f);
+}
+
+void destroy_node(void *node) {
+    DfsFile *f = *((DfsFile **) node);
+    free(f->data);
+    free(f->name);
+    free(f->recipe);
+}
+
+void destroy_tree() {
+    tdestroy(pathRoot, destroy_node);
 }
 
 
@@ -260,12 +271,16 @@ static int dfs_getattr(const char *path, struct stat *stbuf)
 static int dfs_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
                          off_t offset, struct fuse_file_info *fi)
 {
+    pthread_mutex_lock(&treeMut);
     DfsFile	*f = findFile((char *)path);
     int		i;
 
     dfs_out("READDIR: '%s'\n", path);
 
-    if (!f) return -ENOENT;
+    if (!f) {
+	pthread_mutex_unlock(&treeMut);
+	return -ENOENT;
+    }
 
     filler(buf, ".", NULL, 0);
     filler(buf, "..", NULL, 0);
@@ -273,27 +288,33 @@ static int dfs_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
     for (i = 0; i < f->num_children; i++) {
 	filler(buf, f->child[i]->name, NULL, 0);
     }
-
+    pthread_mutex_unlock(&treeMut);
     return 0;
 }
 
 static int dfs_open(const char *path, struct fuse_file_info *fi)
 {
     DfsFile	*f;
-
+    pthread_mutex_lock(&treeMut);
     dfs_out("\n\tFUSE OPEN '%s'\n\n", path);
 
-    if (!(f = findFile((char *)path))) 
+    if (!(f = findFile((char *)path))) {
+	pthread_mutex_unlock(&treeMut);
 	return -ENOENT;
+    }
 
     long	flags = fi ? fi->flags : 0;
 
     dfs_out("\tOPEN : '%s', flags %o, len %d, reclen %d, recipe %x, data %x\n", path, flags, f->len, f->recipelen, f->recipe, f->data);
 
-    if (f->stat.st_mode & S_IFDIR) return -EISDIR;
+    if (f->stat.st_mode & S_IFDIR) {
+	pthread_mutex_unlock(&treeMut);
+	return -EISDIR;
+    }
 
     if (0 && !(fi->flags & f->stat.st_mode)) {
 	dfs_out("OPEN permissions problem: %o, %o\n", fi->flags, f->stat.st_mode);
+	pthread_mutex_unlock(&treeMut);
         return -EACCES;
     }
 
@@ -321,6 +342,7 @@ static int dfs_open(const char *path, struct fuse_file_info *fi)
 	}
 	assert((data == dataEnd) && (sig == sigEnd));
     }
+    pthread_mutex_unlock(&treeMut);
     return 0;
 }
 
@@ -329,17 +351,25 @@ static int dfs_read(const char *path, char *buf, size_t size, off_t offset,
                       struct fuse_file_info *fi)
 {
     size_t len;
-
+    pthread_mutex_lock(&treeMut);
     dfs_out("READ: '%s', sz %d, offset %d\n", path, size, offset);
 
     DfsFile	*f = findFile((char *)path);
 
-    if (!f) return -ENOENT;
+    if (!f) {
+	pthread_mutex_unlock(&treeMut);
+	return -ENOENT;
+    }
 
-    if (size && !f->len) 
+    if (size && !f->len)  {
+	pthread_mutex_unlock(&treeMut);
 	return 0;
+    }
 
-    if (f->stat.st_mode & S_IFDIR) return -EISDIR;
+    if (f->stat.st_mode & S_IFDIR) {
+	pthread_mutex_unlock(&treeMut);
+	return -EISDIR;
+    }
 
     len = f->len;
     if (offset < len) {
@@ -350,6 +380,7 @@ static int dfs_read(const char *path, char *buf, size_t size, off_t offset,
         size = 0;
 
     f->stat.st_atime = time(NULL);
+    pthread_mutex_unlock(&treeMut);
     return size;
 }
 
@@ -358,14 +389,20 @@ static int dfs_write(const char *path, const char *buf, size_t size, off_t offse
                       struct fuse_file_info *fi)
 {
     size_t len;
-
+    pthread_mutex_lock(&treeMut);
     dfs_out("WRITE: '%s', sz %d, offset %d\n", path, size, offset);
 
     DfsFile	*f = findFile((char *)path);
 
-    if (!f) return -ENOENT;
+    if (!f) {
+	pthread_mutex_unlock(&treeMut);
+	return -ENOENT;
+    }
 
-    if (f->stat.st_mode & S_IFDIR) return -EISDIR;
+    if (f->stat.st_mode & S_IFDIR) {
+	pthread_mutex_unlock(&treeMut);
+	return -EISDIR;
+    }
 
     assert(!f->recipelen || f->data);
 
@@ -378,22 +415,29 @@ static int dfs_write(const char *path, const char *buf, size_t size, off_t offse
     f->dirty = 1;
 
     f->stat.st_mtime = f->stat.st_atime = time(NULL);
+    pthread_mutex_unlock(&treeMut);
     return size;
 }
 
 
 int dfs_create(const char *path, mode_t mode, struct fuse_file_info *fi)
 {
+    pthread_mutex_lock(&treeMut);
     dfs_out("CREATE: '%s'\n", path);
 
     DfsFile	*f = findFile((char *)path);
     DfsFile	*dir;
     char	*dname, *fname;
 
-    if (f) return -EEXIST;
+    if (f) {
+	pthread_mutex_unlock(&treeMut);
+	return -EEXIST;
+    }
 
-    if (!(fname = strrchr(path, '/'))) 
+    if (!(fname = strrchr(path, '/'))) {
+	pthread_mutex_unlock(&treeMut);
 	return -EINVAL;
+    }
 
     dname = strdup(path);
     dname[fname - path] = 0;
@@ -401,6 +445,7 @@ int dfs_create(const char *path, mode_t mode, struct fuse_file_info *fi)
 
     if (!(dir = findFile(dname))) {
 	free(dname);
+	pthread_mutex_unlock(&treeMut);
 	return -EINVAL;
     }
 
@@ -413,13 +458,14 @@ int dfs_create(const char *path, mode_t mode, struct fuse_file_info *fi)
     f->version++;
 
     logFileVersion(f);
-
+    pthread_mutex_unlock(&treeMut);
     return 0;
 }
 
 
-int dfs_chmod(const char *path, mode_t mode)
+int _dfs_chmod(const char *path, mode_t mode)
 {
+    /* Assumes treeMut is locked */
     DfsFile	*f;
 
     dfs_out("CHMOD: '%s' %o\n", path, mode);
@@ -430,14 +476,29 @@ int dfs_chmod(const char *path, mode_t mode)
     f->stat.st_mode = (f->stat.st_mode &  ~(S_IRWXU | S_IRWXG | S_IRWXO)) | mode;
     dfs_out("\tend mode: %o\n", f->stat.st_mode);
 
-    logOther(LOG_CHMOD, path, mode, &f->stat);
-
     return 0;
 }
 
+int dfs_chmod(const char *path, mode_t mode) {
+    int out;
+    DfsFile *f;
+    pthread_mutex_lock(&treeMut);
+    out = _dfs_chmod(path, mode);
+    if (out) {
+	pthread_mutex_unlock(&treeMut);
+	return out;
+    }
+    f = findFile((char *)path);
+    logOther(LOG_CHMOD, path, mode, &f->stat);
+    pthread_mutex_unlock(&treeMut);
+    return out;
+}
 
-int dfs_mkdir(const char *path, mode_t mode)
+
+
+int _dfs_mkdir(const char *path, mode_t mode)
 {
+    /* Assumes treeMut is locked */
     //S_IFDIR
     DfsFile	*dir;
     char	*dname = strdup(path), *fname;
@@ -478,14 +539,25 @@ int dfs_mkdir(const char *path, mode_t mode)
 
     free(dname);
 
-    logOther(LOG_MKDIR, path, mode, NULL);
-
     return 0;
 }
 
+int dfs_mkdir(const char *path, mode_t mode) {
+    int out;
+    pthread_mutex_lock(&treeMut);
+    out = _dfs_mkdir(path, mode);
+    if (out) {
+	pthread_mutex_unlock(&treeMut);
+	return out;
+    }
+    logOther(LOG_MKDIR, path, mode, NULL);
+    pthread_mutex_unlock(&treeMut);
+    return out;
+}
 
-int dfs_rmdir(const char *path)
+int _dfs_rmdir(const char *path)
 {
+    /* Assumes treeMut is locked */
     DfsFile	*f;
 
     if (!(f = findFile((char *)path)))
@@ -499,14 +571,25 @@ int dfs_rmdir(const char *path)
 
     freeNode(path, f);
 
-    logOther(LOG_RMDIR, path, 0, NULL);
-
     return 0;
 }
 
-	
-int dfs_unlink(const char *path)
+int dfs_rmdir(const char *path) {
+    int out;
+    pthread_mutex_lock(&treeMut);
+    out = _dfs_rmdir(path);
+    if (out) {
+	pthread_mutex_unlock(&treeMut);
+	return out;
+    }
+    logOther(LOG_RMDIR, path, 0, NULL);
+    pthread_mutex_unlock(&treeMut);
+    return out;
+}
+     
+int _dfs_unlink(const char *path)
 {
+    /* Assumes treeMut is locked */
     DfsFile	*f;
 
     dfs_out("Unlink '%s'\n", path);
@@ -521,9 +604,20 @@ int dfs_unlink(const char *path)
 
     freeNode(path, f);
 
-    logOther(LOG_UNLINK, path, 0, NULL);
-
     return 0;
+}
+
+int dfs_unlink(const char *path) {
+    int out;
+    pthread_mutex_lock(&treeMut);
+    out = _dfs_unlink(path);
+    if (out) {
+	pthread_mutex_unlock(&treeMut);
+	return out;
+    }
+    logOther(LOG_UNLINK, path, 0, NULL);
+    pthread_mutex_unlock(&treeMut);
+    return out;
 }
 
 
@@ -532,11 +626,13 @@ int dfs_unlink(const char *path)
 static int dfs_flush(const char *path, struct fuse_file_info *fi)
 {
     DfsFile	*f;
-
+    pthread_mutex_lock(&treeMut);
     dfs_out("DFS_FLUSH '%s\n", path);
 
-    if (!(f = findFile((char *)path)))
+    if (!(f = findFile((char *)path))) {
+	pthread_mutex_unlock(&treeMut);
 	return -EINVAL;
+    }
 
     assert(f);
 
@@ -546,6 +642,7 @@ static int dfs_flush(const char *path, struct fuse_file_info *fi)
     if (!f->data || !f->dirty) {
 	free(f->data);
 	f->data = NULL;
+	pthread_mutex_unlock(&treeMut);
 	return 0;
     }
 
@@ -584,7 +681,7 @@ static int dfs_flush(const char *path, struct fuse_file_info *fi)
     f->dirty = 0;
 
     logFileVersion(f);
-    
+    pthread_mutex_unlock(&treeMut);
     return 0;
 }
 
@@ -592,11 +689,13 @@ static int dfs_flush(const char *path, struct fuse_file_info *fi)
 static int dfs_truncate(const char *path, off_t sz)
 {
     DfsFile	*f;
-
+    pthread_mutex_lock(&treeMut);
     dfs_out("\n\tFUSE TRUNCATE\n\n");
 
-    if (!(f = findFile((char *)path)))
+    if (!(f = findFile((char *)path))) {
+	pthread_mutex_unlock(&treeMut);
 	return -ENOENT;
+    }
 
     dfs_out("TRUNCATE to %d, was %d\n", sz, f->len);
 
@@ -604,12 +703,14 @@ static int dfs_truncate(const char *path, off_t sz)
 	f->len = f->stat.st_size = sz;
 	f->dirty = 1;
     }
+    pthread_mutex_unlock(&treeMut);
     return 0;
 }
 
 
 static void init(char *sname, int sport, char *xname, int xport)
 {
+    pthread_mutex_lock(&treeMut);
     dfs_out("INIT!\n");
     root = mkNode("", "", NULL, DEF_DIR_MODE);
 
@@ -637,6 +738,7 @@ static void init(char *sname, int sport, char *xname, int xport)
 	    free(reply);
 	}
     }
+    pthread_mutex_unlock(&treeMut);
 }
 
 
@@ -701,4 +803,88 @@ int main(int argc, char *argv[])
     init(sname, sport, xname, xport);
 
     return fuse_main(argc - arg, argv, &dfs_oper, NULL);
+}
+
+
+// called to reply records from logs returned from server
+void playLog(char *buf, int len)
+{
+    /* Assumes treeMut and replyLogserverMut are locked */
+    /* Find first ID of the new entry, go through whole log
+       and truncate if that ID or greater is found, then append
+       the new log.  It is assumed that the server has successfully
+       managed any conflicts and any of that is taken care of. */
+    char *data = opLog.data;
+    char *end = opLog.data + opLog.used;
+    destroy_tree();
+    root = mkNode("", "", NULL, DEF_DIR_MODE);
+    while (data < end) {
+	switch ( ((LogHdr *)data)->type ) {
+	case LOG_FILE_VERSION:
+	    {
+		LogFileVersion	*fv = (LogFileVersion *)data;
+		char		*recipes = (char *)(fv + 1);
+		char		*path = recipes + fv->recipelen;
+		DfsFile	*f;
+		f = findFile((char *)path);
+		if (!f) {
+		    DfsFile *dir;
+		    char *dname, *fname;
+		    fname = strrchr(path, '/');
+		    dname = strdup(path);
+		    dname[fname - path] = 0;
+		    fname++;
+		    dir = findFile(dname);
+		    f = mkNode(path, fname, dir, DEF_FILE_MODE);
+		    free(dname);
+		}
+		// Update mtime
+		f->stat.st_mtime = fv->mtime;
+		// Update version
+		f->version = fv->hdr.version;
+		// Update recipelen
+		f->recipelen = fv->recipelen;
+		// Update mode
+		f->stat.st_mode = fv->flags;
+		// Update length
+		f->len = fv->flen;
+		// Update recipe
+		free(f->recipe);
+		f->recipe = malloc(fv->recipelen);
+		memcpy(f->recipe, recipes, fv->recipelen);
+	    }
+	    break;
+	case LOG_UNLINK:
+	    {
+		char *path = (char *)((LogOther *)data + 1);
+		_dfs_unlink(path);
+	    }
+	    break;
+	case LOG_MKDIR:
+	    {
+		char *path = (char *)((LogOther *)data + 1);
+		long mode = ((LogOther *)data)->flags;
+		_dfs_mkdir(path, mode);
+	    }
+	    break;
+	case LOG_RMDIR:
+	    {
+		char *path = (char *)((LogOther *)data + 1);
+		_dfs_rmdir(path);
+	    }
+	    break;
+	case LOG_CHMOD:
+	    {
+		char *path = (char *)((LogOther *)data + 1);
+		long mode = ((LogOther *)data)->flags;
+		_dfs_chmod(path, mode);
+	    }
+	    break;
+	default:
+	    printf("BAD RECORD\n");
+	    exit(1);
+	}
+
+	data += ((LogHdr *)data)->len;
+    }    
 }

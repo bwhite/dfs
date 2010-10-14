@@ -36,7 +36,7 @@ static int			noLog;
 
 extern pthread_mutex_t		replyLogserverMut;
 extern pthread_cond_t		replyLogserverCond;
-
+extern void playLog(char *buf, int len);
 
 //=============================================================================
 
@@ -53,6 +53,7 @@ void *checkLogSpace(int newbytes)
 // called by next two procs to add a record to the log, and push to server
 void pushLog(char *from, long len)
 {
+    /* Assumes treeMut is locked */
     // need to pad record to make room for long 
     len += sizeof(long);
     if (len % sizeof(double))
@@ -74,17 +75,22 @@ void pushLog(char *from, long len)
 	fclose(o);
     }
     {
-	Msg *reply = comm_send_and_reply(opLog.net_fd, DFS_MSG_PUSH_LOG, from, len, NULL);
+	Msg *reply = comm_send_and_reply_mutex(&replyLogserverMut, &replyLogserverCond, opLog.net_fd, DFS_MSG_PUSH_LOG, from, len, NULL);
 	// TODO If log server gives us any a new log, then we need to replay it
 	// for now we are assuming that we will get the whole log
+	{
+	    long lastID = ((long *)(reply->data + reply->len))[-1];
+	    dfs_out("received %d bytes (%ld records) from PUSH_LOG request\n", reply->len, lastID);
+	}
+	playLog(reply->data, reply->len);
 	free(reply);
     }
 }
 
-
 // add file record
 void logFileVersion(DfsFile *f)
 {
+    /* Assumes treeMut is locked */
     LogFileVersion *fv;
     int recipe_offset = sizeof(LogFileVersion);
     int path_offset = recipe_offset + f->recipelen;
@@ -110,6 +116,7 @@ void logFileVersion(DfsFile *f)
 // add record for other types
 void logOther(int type, const char *path, int flags, struct stat *stat)
 {
+    /* Assumes treeMut is locked */
     int path_offset = sizeof(LogOther);
     int len =  path_offset + strlen(path) + 1;
     LogOther *fv = calloc(1, len + sizeof(double) + sizeof(long));
@@ -123,12 +130,4 @@ void logOther(int type, const char *path, int flags, struct stat *stat)
     memcpy((char *)fv + path_offset, path, len - path_offset);
     pushLog((char *)fv, len);
     free(fv);
-}
-
-
-// called to reply records from logs returned from server
-void playLog(char *buf, int len)
-{
-    pthread_mutex_lock(&replyLogserverMut);
-    pthread_mutex_unlock(&replyLogserverMut);
 }

@@ -18,6 +18,8 @@ Msg			*replyQueue;
 Client			*clients;
 static CommStats	*commStats;
 static pthread_mutex_t	statsMut = PTHREAD_MUTEX_INITIALIZER;
+pthread_mutex_t			replyLogserverMut = PTHREAD_MUTEX_INITIALIZER;
+pthread_cond_t			replyLogserverCond = PTHREAD_COND_INITIALIZER;
 
 
 
