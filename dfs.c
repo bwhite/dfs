@@ -302,14 +302,12 @@ static int dfs_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
     return 0;
 }
 
-static int dfs_open(const char *path, struct fuse_file_info *fi)
+static int _dfs_open(const char *path, struct fuse_file_info *fi)
 {
     DfsFile	*f;
-    pthread_mutex_lock(&treeMut);
     dfs_out("\n\tFUSE OPEN '%s'\n\n", path);
 
     if (!(f = findFile((char *)path))) {
-	pthread_mutex_unlock(&treeMut);
 	return -ENOENT;
     }
 
@@ -318,13 +316,11 @@ static int dfs_open(const char *path, struct fuse_file_info *fi)
     dfs_out("\tOPEN : '%s', flags %o, len %d, reclen %d, recipe %x, data %x\n", path, flags, f->len, f->recipelen, f->recipe, f->data);
 
     if (f->stat.st_mode & S_IFDIR) {
-	pthread_mutex_unlock(&treeMut);
 	return -EISDIR;
     }
 
     if (0 && !(fi->flags & f->stat.st_mode)) {
 	dfs_out("OPEN permissions problem: %o, %o\n", fi->flags, f->stat.st_mode);
-	pthread_mutex_unlock(&treeMut);
         return -EACCES;
     }
 
@@ -352,10 +348,16 @@ static int dfs_open(const char *path, struct fuse_file_info *fi)
 	}
 	assert((data == dataEnd) && (sig == sigEnd));
     }
-    pthread_mutex_unlock(&treeMut);
     return 0;
 }
-
+static int dfs_open(const char *path, struct fuse_file_info *fi) {
+    int out;
+    pthread_mutex_lock(&treeMut);
+    out = _dfs_open(path, fi);
+    pthread_mutex_unlock(&treeMut);
+    return out;
+}
+    
 
 static int dfs_read(const char *path, char *buf, size_t size, off_t offset,
                       struct fuse_file_info *fi)
@@ -417,7 +419,7 @@ static int dfs_write(const char *path, const char *buf, size_t size, off_t offse
     if(!(!f->recipelen || f->data)) {
 	struct fuse_file_info fii;
 	fii.flags = 0;
-	dfs_open(path, &fii);
+	_dfs_open(path, &fii);
     }
     //assert(!f->recipelen || f->data);
 
