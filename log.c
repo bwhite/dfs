@@ -54,40 +54,26 @@ void *checkLogSpace(int newbytes)
 void pushLog(char *from, long len)
 {
     /* Assumes treeMut is locked */
+    // Try to push to the server, if it goes cleanly then apply, else apply server's updates
     // need to pad record to make room for long 
     len += sizeof(long);
     if (len % sizeof(double))
 	len += sizeof(double) - (len % sizeof(double));
     ((LogHdr*)from)->len = len;
     *((long*)(from + len - sizeof(long))) = len;
-    checkLogSpace(len);
+    Msg *reply = comm_send_and_reply_mutex(&replyLogserverMut, &replyLogserverCond, opLog.net_fd, DFS_MSG_PUSH_LOG, from, len, NULL);
+    if (reply->type == REPLY_ERR) {
+	playLog(reply->data, reply->len);
+    } else {
+	checkLogSpace(len);
+	memcpy(opLog.data + opLog.used, from, len);
+	opLog.used = opLog.used + len;
+    }
 
-    // copy the record into the log, update opLog.used, served
-    memcpy(opLog.data + opLog.used, from, len);
-    opLog.used = opLog.used + len;
-    // flush to server. If server responds, replay them locally.
-    // IMPORTANT: Ensure that the replaying doesn't cause PUSH_LOG's to the server.
-    // Save the whole log for debugging purposes
-    {
-	dfs_out("Saving log to pushLog.log\n");
-	FILE* o = fopen("pushLog.log", "w");
-	fwrite(opLog.data, opLog.used, 1, o);
-	fclose(o);
-    }
-    if (1) {
-	Msg *reply = comm_send_and_reply_mutex(&replyLogserverMut, &replyLogserverCond, opLog.net_fd, DFS_MSG_PUSH_LOG, from, len, NULL);
-	// TODO If log server gives us any a new log, then we need to replay it
-	// for now we are assuming that we will get the whole log
-	{
-	    long lastID = ((long *)(reply->data + reply->len))[-1];
-	    dfs_out("received %d bytes (%ld records) from PUSH_LOG request\n", reply->len, lastID);
-	}
-	dfs_out("Got reply\n");
-	if (reply->len) {
-	    playLog(reply->data, reply->len);
-	}
-	free(reply);
-    }
+    free(reply);
+
+
+
     dfs_out("Done pushing\n");
 }
 
@@ -134,10 +120,4 @@ void logOther(int type, const char *path, int flags, struct stat *stat)
     memcpy((char *)fv + path_offset, path, len - path_offset);
     pushLog((char *)fv, len);
     free(fv);
-    // Replay on delete dir for debugging
-    if (0 && type == LOG_RMDIR) {
-	dfs_out("Replaying log");
-	playLog(0, 0);
-	dfs_out("Done Replaying log");
-    }
 }
