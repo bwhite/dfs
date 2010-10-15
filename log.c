@@ -65,7 +65,8 @@ void pushLog(char *from, long len)
     pthread_mutex_unlock(&treeMut);
     Msg *reply = comm_send_and_reply_mutex(&replyLogserverMut, &replyLogserverCond, opLog.net_fd, DFS_MSG_PUSH_LOG, from, len, NULL);
     pthread_mutex_lock(&treeMut);
-    if (reply->type == REPLY_ERR) {
+    if (reply->res == REPLY_ERR) {
+	dfs_out("***Collision*** Applying updates\n");
 	playLog(reply->data, reply->len);
     } else {
 	checkLogSpace(len);

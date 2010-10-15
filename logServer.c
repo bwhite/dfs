@@ -9,6 +9,7 @@
 Log				opLog;
 static pthread_mutex_t		serverMut = PTHREAD_MUTEX_INITIALIZER;
 Client *my_clients;
+int push_updates = 1;
 
 //=============================================================================
 
@@ -74,7 +75,7 @@ void logNames(char *base, char **iname, char **oname)
 static void logInit(char *iname, char *oname, int sport)
 {
     logNames("LOG_SERVER", &iname, &oname);
-
+    opLog.id = 0;
     if ((opLog.file_fd = fopen(oname, "w")) < 0)
 	dfs_die("No open log '%s' for writing\n", oname);
 
@@ -91,7 +92,6 @@ static void logInit(char *iname, char *oname, int sport)
 	fstat(fd, &stat);
     
 	assert(!opLog.data);
-
 	if (stat.st_size) {
 	    checkLogSpace(stat.st_size + BLOCK_SIZE /* make sure to alloc even if zero len log */);
 	    read(fd, opLog.data, stat.st_size);
@@ -227,21 +227,23 @@ static void *listen_proc(void *arg)
 		} else {
 		    comm_reply(c->fd, m, REPLY_OK, NULL);
 		    // Append to log
+		    ((LogHdr *)m->data)->id = ++opLog.id; // Forces all commits to be sequential
+		    dfs_out("Record gets id[%d]\n", opLog.id);
 		    checkLogSpace(m->len);
 		    memcpy(opLog.data + opLog.used, m->data, m->len);
 		    opLog.used = opLog.used + m->len;
-		}
-		{
-		    // flush to other clients
-		    dfs_out("Outside while\n");
-		    Client *cur_c = my_clients;
-		    while(cur_c != NULL) {
-			dfs_out("Sending again[%p]...\n", cur_c);
-			comm_send(cur_c->fd, DFS_MSG_PUSH_LOG, m->data, m->len, NULL);
-			cur_c = cur_c->next;
+		    if (push_updates){
+			// flush to other clients
+			dfs_out("Outside while\n");
+			Client *cur_c = my_clients;
+			while(cur_c != NULL) {
+			    dfs_out("Sending again[%p]...\n", cur_c);
+			    comm_send(cur_c->fd, DFS_MSG_PUSH_LOG, m->data, m->len, NULL);
+			    cur_c = cur_c->next;
+			}
 		    }
+		    serverFlush(1);
 		}
-		serverFlush(1);
 		dfs_out("Unlocking\n");
 		pthread_mutex_unlock(&serverMut);
 	    }
@@ -264,8 +266,11 @@ int main(int argc, char *argv[])
     char		*oname = NULL;
     int			port = LOG_PORT;
 
-    while ((c = getopt(argc, argv, "i:o:p:")) != -1) {
+    while ((c = getopt(argc, argv, "i:o:p:c")) != -1) {
 	switch (c) {
+	case 'c':
+	    push_updates = 0;
+	    break;
 	case 'i':
 	    iname = optarg;
 	    break;

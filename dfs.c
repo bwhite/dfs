@@ -413,8 +413,13 @@ static int dfs_write(const char *path, const char *buf, size_t size, off_t offse
 	pthread_mutex_unlock(&treeMut);
 	return -EISDIR;
     }
-
-    assert(!f->recipelen || f->data);
+    // Handles issue where a collision can cause us to fail this check
+    if(!(!f->recipelen || f->data)) {
+	struct fuse_file_info fii;
+	fii.flags = 0;
+	dfs_open(path, &fii);
+    }
+    //assert(!f->recipelen || f->data);
 
     if ((size + offset) > f->len) {
 	f->data = (char *)realloc(f->data, size + offset);
