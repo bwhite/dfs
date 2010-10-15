@@ -13,6 +13,14 @@ static pthread_mutex_t		serverMut = PTHREAD_MUTEX_INITIALIZER;
 //=============================================================================
 
 
+// re-alloc log, if necessary, to ensure room
+void *checkLogSpace(int newbytes)
+{
+    int new_size = opLog.used + newbytes;
+    opLog.data = realloc(opLog.data, new_size);
+    opLog.alloced = new_size;
+}
+
 // flush logs received from clients
 static void serverFlush(int force)
 {
@@ -85,7 +93,7 @@ static void logInit(char *iname, char *oname, int sport)
 	assert(!opLog.data);
 
 	if (stat.st_size) {
-	    checkSpace(stat.st_size + BLOCK_SIZE /* make sure to alloc even if zero len log */);
+	    checkLogSpace(stat.st_size + BLOCK_SIZE /* make sure to alloc even if zero len log */);
 	    read(fd, opLog.data, stat.st_size);
 	    close(fd);
 
@@ -103,13 +111,50 @@ static void logInit(char *iname, char *oname, int sport)
 }
     
 
+/*
 static void receiveLog(Client *c, Msg *m)
 {
 }
-
+*/
 
 static void *listen_proc(void *arg) 
 {
+    Client	*c = arg;
+
+    dfs_out("\n\tLISTEN PROC IN, sock %d! (id %d, tid %d)\n\n", c->fd, c->id, c->tid);
+
+    pthread_detach(pthread_self());
+
+    Msg *m;
+    while (m = comm_read(c->fd)) {
+	Extent		*ex;
+	char		*sig, *data;
+
+	switch (m->type) {
+	case DFS_MSG_GET_LOG:
+	    pthread_mutex_lock(&serverMut);
+	    comm_reply(c->fd, m, REPLY_OK, opLog.data, opLog.used, NULL);
+	    pthread_mutex_unlock(&serverMut);
+	    break;
+
+	case DFS_MSG_PUSH_LOG:
+	    pthread_mutex_lock(&serverMut);
+	    // TODO Check to see if this log entry is a collision
+	    comm_reply(c->fd, m, REPLY_OK, NULL);
+	    // Append to log
+	    checkLogSpace(m->len);
+	    memcpy(opLog.data + opLog.used, m->data, m->len);
+	    opLog.used = opLog.used + m->len;
+	    pthread_mutex_unlock(&serverMut);
+	    break;
+	default:
+	    dfs_die("BAD MSG TYPE %d\n", m->type);
+	}
+
+	free(m);
+    }
+    free(c);
+    return NULL;
 }
 
 

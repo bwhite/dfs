@@ -13,7 +13,7 @@ LIBS =  -lfuse -lgcrypt -lpthread
 CFLAGS += -DLINUX
 endif
 
-TARGETS = dfs extent printLog #logServer
+TARGETS = dfs extent printLog logServer
 
 all: $(TARGETS)
 

@@ -820,7 +820,11 @@ void playLog(char *buf, int len)
        and truncate if that ID or greater is found, then append
        the new log.  It is assumed that the server has successfully
        managed any conflicts and any of that is taken care of. */
+    // TODO This assumes we are only adding, doesn't handle collision
+    checkLogSpace(len);
     char *data = opLog.data;
+    memcpy(data + opLog.used, buf, len);
+    opLog.used = opLog.used + len;
     char *end = opLog.data + opLog.used;
     destroy_tree();
     root = mkNode("", "", NULL, DEF_DIR_MODE);
