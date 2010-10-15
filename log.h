@@ -46,7 +46,7 @@ typedef struct {
     long	id; // Last ID used
     long	saved; // 
     long	served; // Amount sent to the server (only used by client)
-    int		file_fd;
+    FILE*	file_fd;
     int		net_fd;
 } Log;
 

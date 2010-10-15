@@ -77,7 +77,9 @@ static void *listener(void *arg)
 	switch (m->type) {
 	case DFS_MSG_PUSH_LOG:
 	    /* Lock tree and replay log.  Assumes we get the whole log.  */
+	    pthread_mutex_lock(&replyLogserverMut);
 	    playLog(m->data, m->len);
+	    pthread_mutex_unlock(&replyLogserverMut);
 	    break;
 
 	case MSG_REPLY:
@@ -811,7 +813,6 @@ int main(int argc, char *argv[])
     return fuse_main(argc - arg, argv, &dfs_oper, NULL);
 }
 
-
 // called to reply records from logs returned from server
 void playLog(char *buf, int len)
 {
@@ -820,14 +821,35 @@ void playLog(char *buf, int len)
        and truncate if that ID or greater is found, then append
        the new log.  It is assumed that the server has successfully
        managed any conflicts and any of that is taken care of. */
-    // TODO This assumes we are only adding, doesn't handle collision
-    checkLogSpace(len);
+    // If we aren't forcing, check if this entry is in the log
     char *data = opLog.data;
-    memcpy(data + opLog.used, buf, len);
-    opLog.used = opLog.used + len;
     char *end = opLog.data + opLog.used;
+    int first_version = ((LogHdr *)buf)->id;
+    /* If we already have this version then quit.
+       We only check the first record as if we asked
+       for the log we have an empty log.  If we get
+       pushed then we recieve one log entry and we just
+       need to check if we have already committed it.
+     */
+    while (data != NULL && data < end) {
+	int version = ((LogHdr *)data)->id;
+	dfs_out("[%d] [%d]", first_version, version);
+	if (version == first_version) {
+	    dfs_out("PlayLog: Already have element in log\n");
+	    return;
+	}
+	data += ((LogHdr *)data)->len;
+    }
+    dfs_out("PlayLog: Adding new element\n");
+    checkLogSpace(len);
+    data = opLog.data;
+    dfs_out("PlayLog: Adding new element[%p][%d][%d]\n", opLog.data, opLog.used, opLog.alloced);
+    memcpy(data + opLog.used, buf, len);
+    opLog.used += len;
+    end = opLog.data + opLog.used;
     destroy_tree();
     root = mkNode("", "", NULL, DEF_DIR_MODE);
+    int last_id = 1;
     while (data < end) {
 	switch ( ((LogHdr *)data)->type ) {
 	case LOG_FILE_VERSION:
@@ -895,7 +917,9 @@ void playLog(char *buf, int len)
 	    printf("BAD RECORD\n");
 	    exit(1);
 	}
-
+	last_id = ((LogHdr *)data)->id;
 	data += ((LogHdr *)data)->len;
-    }    
+    }
+    dfs_out("Last ID[%d]\n", last_id);
+    opLog.id = last_id;
 }

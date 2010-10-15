@@ -88,7 +88,8 @@ void logFileVersion(DfsFile *f)
     fv = calloc(1, len + sizeof(double) + sizeof(long));
     dfs_out("LFV: [%d, %d, %d, %p]\n", recipe_offset, path_offset, len, fv);
     fv->hdr.type = LOG_FILE_VERSION;
-    fv->hdr.id = ++opLog.id; // B:TODO: We may need to put a mutex here
+    fv->hdr.id = ++opLog.id;
+    dfs_out("***Created new id[%d]***\n", fv->hdr.id);
     fv->hdr.version = f->version;
     //fv->hdr.len // Set in pushLog
     // fv->hdr.creator // B:TODO: Not sure what to do with it

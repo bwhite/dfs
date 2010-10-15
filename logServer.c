@@ -7,8 +7,8 @@
 #include <unistd.h>
 
 Log				opLog;
-
 static pthread_mutex_t		serverMut = PTHREAD_MUTEX_INITIALIZER;
+Client *my_clients;
 
 //=============================================================================
 
@@ -24,9 +24,9 @@ void *checkLogSpace(int newbytes)
 // flush logs received from clients
 static void serverFlush(int force)
 {
+    /* Assumes mutex is locked */
     // flush to disk
-
-    // flush to other clients
+    fwrite(opLog.data, opLog.used, 1, opLog.file_fd);
 }
 
 
@@ -75,7 +75,7 @@ static void logInit(char *iname, char *oname, int sport)
 {
     logNames("LOG_SERVER", &iname, &oname);
 
-    if ((opLog.file_fd = open(oname, O_WRONLY | O_CREAT | O_TRUNC, 0666)) < 0)
+    if ((opLog.file_fd = fopen(oname, "w")) < 0)
 	dfs_die("No open log '%s' for writing\n", oname);
 
     if (iname) {
@@ -164,7 +164,7 @@ int check_collision(Msg *m, char **start, char **stop) {
 	    printf("BAD RECORD\n");
 	    exit(1);
 	}
-	dfs_out("Checking path [%s][%d][%d]\n", path, version, ((LogHdr *)data)->len);
+	//dfs_out("Checking path [%s][%d][%d]\n", path, version, ((LogHdr *)data)->len);
 	// First condition: If we are modifying any path along the way
 	if (cur_version >= version && !strcmp(path, cur_path)) {
 	    *start = data;
@@ -180,6 +180,22 @@ int check_collision(Msg *m, char **start, char **stop) {
 static void *listen_proc(void *arg) 
 {
     Client	*c = arg;
+    // Make chain
+    pthread_mutex_lock(&serverMut);
+    dfs_out("Adding client[%p]\n", my_clients);
+    if (my_clients == NULL) {
+	my_clients = c;
+	dfs_out("Added first client\n");
+    } else {
+	Client *cur_c = my_clients;
+	while (cur_c->next != NULL) {
+	    cur_c = cur_c->next;
+	}
+	cur_c->next = c;
+	dfs_out("Added another\n");
+    }
+    c->next = NULL;
+    pthread_mutex_unlock(&serverMut);
 
     dfs_out("\n\tLISTEN PROC IN, sock %d! (id %d, tid %d)\n\n", c->fd, c->id, c->tid);
 
@@ -205,7 +221,7 @@ static void *listen_proc(void *arg)
 		char *start, *stop;
 
 		dfs_out("Col Check\n");
-		if (0 &&check_collision(m, &start, &stop)) {
+		if (check_collision(m, &start, &stop)) {
 		    dfs_out("***Collision***\n");
 		    comm_reply(c->fd, m, REPLY_ERR, start, stop - start, NULL);
 		} else {
@@ -215,6 +231,17 @@ static void *listen_proc(void *arg)
 		    memcpy(opLog.data + opLog.used, m->data, m->len);
 		    opLog.used = opLog.used + m->len;
 		}
+		{
+		    // flush to other clients
+		    dfs_out("Outside while\n");
+		    Client *cur_c = my_clients;
+		    while(cur_c != NULL) {
+			dfs_out("Sending again[%p]...\n", cur_c);
+			comm_send(cur_c->fd, DFS_MSG_PUSH_LOG, m->data, m->len, NULL);
+			cur_c = cur_c->next;
+		    }
+		}
+		serverFlush(1);
 		pthread_mutex_unlock(&serverMut);
 	    }
 	    break;
@@ -254,7 +281,7 @@ int main(int argc, char *argv[])
 	    exit(1);
 	}
     }
-
+    my_clients = NULL;
     logInit(iname, oname, port);
 
     comm_register_msgtypes(sizeof(messages) / sizeof(messages[0]), messages);

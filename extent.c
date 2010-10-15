@@ -156,6 +156,8 @@ void ex_put_extent(char *buf, long sz)
     wrapped_tsearch(ex, &extentRoot, extent_compare);
 
     dfs_out("extent '%s' CREATED\n", sig);
+    flush_extents();
+    dfs_out("flushing");
     free(sig);
 }
 
