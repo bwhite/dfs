@@ -13,15 +13,6 @@ static pthread_mutex_t		serverMut = PTHREAD_MUTEX_INITIALIZER;
 //=============================================================================
 
 
-// re-alloc log, if necessary, to ensure room
-void *checkLogSpace(int newbytes)
-{
-    int new_size = opLog.used + newbytes;
-    opLog.data = realloc(opLog.data, new_size);
-    opLog.alloced = new_size;
-}
-
-
 // flush logs received from clients
 static void serverFlush(int force)
 {

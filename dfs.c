@@ -163,14 +163,20 @@ static void freeNode(const char *path, DfsFile *f) {
 }
 
 void destroy_node(void *node) {
-    DfsFile *f = *((DfsFile **) node);
+    DfsFile *f = ((DfsFile *) node);
+    if (!f)
+	return;
+    dfs_out("Destroy Data\n");
     free(f->data);
+    dfs_out("Destroy Name\n");
     free(f->name);
+    dfs_out("Destroy Recipe\n");
     free(f->recipe);
 }
 
 void destroy_tree() {
     tdestroy(pathRoot, destroy_node);
+    pathRoot = NULL;
 }
 
 
@@ -827,7 +833,7 @@ void playLog(char *buf, int len)
 		char		*path = recipes + fv->recipelen;
 		DfsFile	*f;
 		f = findFile((char *)path);
-		if (!f) {
+		if (f == NULL) {
 		    DfsFile *dir;
 		    char *dname, *fname;
 		    fname = strrchr(path, '/');
@@ -847,11 +853,12 @@ void playLog(char *buf, int len)
 		// Update mode
 		f->stat.st_mode = fv->flags;
 		// Update length
-		f->len = fv->flen;
+		f->stat.st_size = f->len = fv->flen;
 		// Update recipe
 		free(f->recipe);
 		f->recipe = malloc(fv->recipelen);
 		memcpy(f->recipe, recipes, fv->recipelen);
+		dfs_out("Push[%s] version[%d] rlength[%d] recipe[%s] len[%d] dirty[%d]\n", path, f->version, f->recipelen, recipes, f->len, f->dirty);
 	    }
 	    break;
 	case LOG_UNLINK:

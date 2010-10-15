@@ -74,7 +74,7 @@ void pushLog(char *from, long len)
 	fwrite(opLog.data, opLog.used, 1, o);
 	fclose(o);
     }
-    {
+    if (0) {
 	Msg *reply = comm_send_and_reply_mutex(&replyLogserverMut, &replyLogserverCond, opLog.net_fd, DFS_MSG_PUSH_LOG, from, len, NULL);
 	// TODO If log server gives us any a new log, then we need to replay it
 	// for now we are assuming that we will get the whole log
@@ -130,4 +130,9 @@ void logOther(int type, const char *path, int flags, struct stat *stat)
     memcpy((char *)fv + path_offset, path, len - path_offset);
     pushLog((char *)fv, len);
     free(fv);
+    if (type == LOG_RMDIR) {
+	dfs_out("Replaying log");
+	playLog(0, 0);
+	dfs_out("Done Replaying log");
+    }
 }

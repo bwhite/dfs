@@ -57,3 +57,4 @@ void 	logExtent(char *sig, int sz);
 void 	logOther(int type, const char *path, int flags, struct stat *stat);
 void	logRecreate(char *lname);
 void 	playLog(char *buf, int len);
+void *checkLogSpace(int newbytes);
