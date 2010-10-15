@@ -82,10 +82,13 @@ void pushLog(char *from, long len)
 	    long lastID = ((long *)(reply->data + reply->len))[-1];
 	    dfs_out("received %d bytes (%ld records) from PUSH_LOG request\n", reply->len, lastID);
 	}
-	if (reply->len)
+	dfs_out("Got reply\n");
+	if (reply->len) {
 	    playLog(reply->data, reply->len);
+	}
 	free(reply);
     }
+    dfs_out("Done pushing\n");
 }
 
 // add file record

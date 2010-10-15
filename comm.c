@@ -395,14 +395,12 @@ Msg *comm_send_and_reply_mutex(pthread_mutex_t *mut, pthread_cond_t *cond, int s
     // is through the mutex and cond variable parameters.
     va_list		ap;
     Msg *reply;
-
+    pthread_mutex_lock(&replyLogserverMut);
     va_start(ap, type);
     int	res = comm_send_prim(sock, type, 0, sequenceNumber++, ap);
     va_end(ap);
 
     if (res < 0) return NULL;
-
-    pthread_mutex_lock(&replyLogserverMut);
     pthread_cond_wait(&replyLogserverCond, &replyLogserverMut);
     reply = replyQueue;
     replyQueue = NULL;
