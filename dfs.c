@@ -77,9 +77,11 @@ static void *listener(void *arg)
 	switch (m->type) {
 	case DFS_MSG_PUSH_LOG:
 	    /* Lock tree and replay log.  Assumes we get the whole log.  */
+	    pthread_mutex_lock(&treeMut);
 	    pthread_mutex_lock(&replyLogserverMut);
 	    playLog(m->data, m->len);
 	    pthread_mutex_unlock(&replyLogserverMut);
+	    pthread_mutex_unlock(&treeMut);
 	    break;
 
 	case MSG_REPLY:
@@ -833,7 +835,6 @@ void playLog(char *buf, int len)
      */
     while (data != NULL && data < end) {
 	int version = ((LogHdr *)data)->id;
-	dfs_out("[%d] [%d]", first_version, version);
 	if (version == first_version) {
 	    dfs_out("PlayLog: Already have element in log\n");
 	    return;

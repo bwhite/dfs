@@ -400,7 +400,10 @@ Msg *comm_send_and_reply_mutex(pthread_mutex_t *mut, pthread_cond_t *cond, int s
     int	res = comm_send_prim(sock, type, 0, sequenceNumber++, ap);
     va_end(ap);
 
-    if (res < 0) return NULL;
+    if (res < 0) {
+	pthread_mutex_unlock(&replyLogserverMut);
+	return NULL;
+    }
     pthread_cond_wait(&replyLogserverCond, &replyLogserverMut);
     reply = replyQueue;
     replyQueue = NULL;

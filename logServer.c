@@ -125,11 +125,11 @@ int check_collision(Msg *m, char **start, char **stop) {
     if (m->type == LOG_FILE_VERSION) {
 	LogFileVersion *fv = (LogFileVersion*)(m->data);
 	path = ((char *)(fv + 1)) + fv->recipelen;
-	version = fv->hdr.version;
+	version = fv->hdr.id;
     } else {
 	LogOther *fv = (LogOther*)(m->data);
 	path = ((char *)(fv + 1));
-	version = fv->hdr.version;
+	version = fv->hdr.id;
     }
     while (data < end) {
 	char *cur_path;
@@ -139,7 +139,7 @@ int check_collision(Msg *m, char **start, char **stop) {
 	    {
 		LogFileVersion	*fv = (LogFileVersion *)data;
 		char		*recipes = (char *)(fv + 1);
-		cur_version = fv->hdr.version;
+		cur_version = fv->hdr.id;
 		cur_path = recipes + fv->recipelen;
 	    }
 	    break;
@@ -149,14 +149,14 @@ int check_collision(Msg *m, char **start, char **stop) {
 	    {
 		LogOther *fv = (LogOther *)data;
 		cur_path = (char *)(fv + 1);
-		cur_version = fv->hdr.version;
+		cur_version = fv->hdr.id;
 	    }
 	    break;
 	case LOG_RMDIR:
 	    {
 		LogOther *fv = (LogOther *)data;
 		cur_path = (char *)(fv + 1);
-		cur_version = fv->hdr.version;
+		cur_version = fv->hdr.id;
 		// Second condition: If this removes any subpath
 	    }
 	    break;
@@ -242,6 +242,7 @@ static void *listen_proc(void *arg)
 		    }
 		}
 		serverFlush(1);
+		dfs_out("Unlocking\n");
 		pthread_mutex_unlock(&serverMut);
 	    }
 	    break;

@@ -36,6 +36,7 @@ static int			noLog;
 
 extern pthread_mutex_t		replyLogserverMut;
 extern pthread_cond_t		replyLogserverCond;
+extern pthread_mutex_t treeMut;
 extern void playLog(char *buf, int len);
 
 //=============================================================================
@@ -61,7 +62,9 @@ void pushLog(char *from, long len)
 	len += sizeof(double) - (len % sizeof(double));
     ((LogHdr*)from)->len = len;
     *((long*)(from + len - sizeof(long))) = len;
+    pthread_mutex_unlock(&treeMut);
     Msg *reply = comm_send_and_reply_mutex(&replyLogserverMut, &replyLogserverCond, opLog.net_fd, DFS_MSG_PUSH_LOG, from, len, NULL);
+    pthread_mutex_lock(&treeMut);
     if (reply->type == REPLY_ERR) {
 	playLog(reply->data, reply->len);
     } else {
@@ -71,9 +74,6 @@ void pushLog(char *from, long len)
     }
 
     free(reply);
-
-
-
     dfs_out("Done pushing\n");
 }
 
@@ -112,7 +112,7 @@ void logOther(int type, const char *path, int flags, struct stat *stat)
     int len =  path_offset + strlen(path) + 1;
     LogOther *fv = calloc(1, len + sizeof(double) + sizeof(long));
     fv->hdr.type = type;
-    fv->hdr.id = ++opLog.id; // B:TODO: We may need to put a mutex here
+    fv->hdr.id = ++opLog.id;
     fv->hdr.version = 0; // TODO Check this
     //fv->hdr.len // Set in pushLog
     // fv->hdr.creator // B:TODO: Not sure what to do with it
