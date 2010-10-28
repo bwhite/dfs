@@ -63,6 +63,12 @@ pthread_mutex_t treeMut;
 extern Msg			*replyQueue;
 
 
+// Needed by init
+char *sname = "localhost";
+char *xname = "localhost";
+int sport = LOG_PORT;
+int xport = EXTENT_PORT;
+
 //=============================================================================
     
 static void *listener(void *arg) 
@@ -724,8 +730,7 @@ static int dfs_truncate(const char *path, off_t sz)
     return 0;
 }
 
-
-static void init(char *sname, int sport, char *xname, int xport)
+static void * dfs_init(struct fuse_conn_info *conn)
 {
     pthread_mutex_lock(&treeMut);
     dfs_out("INIT!\n");
@@ -772,17 +777,13 @@ static struct fuse_operations dfs_oper = {
     .rmdir   = dfs_rmdir,
     .flush   = dfs_flush,
     .truncate   = dfs_truncate,
+    .init = dfs_init
 };
 
 
 int main(int argc, char *argv[])
 {
     int			i, arg = 0, c;
-    char		*sname = "localhost";
-    char		*xname = "localhost";
-    int			sport = LOG_PORT;
-    int			xport = EXTENT_PORT;
-
     while ((c = getopt(argc, argv, "i:o:s:S:x:X:")) != -1) {
 	switch (c) {
 	case 's':
@@ -816,8 +817,6 @@ int main(int argc, char *argv[])
     for (i = arg+1; i < argc; ++i) {
 	argv[++counter] = argv[i];
     }
-
-    init(sname, sport, xname, xport);
 
     return fuse_main(argc - arg, argv, &dfs_oper, NULL);
 }
