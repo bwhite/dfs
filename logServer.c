@@ -82,7 +82,7 @@ static void logInit(char *iname, char *oname, int sport)
     if (iname) {
 
 	int		fd;
-
+	dfs_out("Reading from '%s', init ID %d\n",iname, opLog.id);
 	if ((fd = open(iname, O_RDONLY)) < 0) {
 	    fprintf(stderr, "Can't open '%s'\n", iname);
 	    exit(1);
@@ -100,10 +100,25 @@ static void logInit(char *iname, char *oname, int sport)
 	    opLog.used = stat.st_size;
 
 	    // rip through log to find last id used :-(
-	    long	back = ((long *)(opLog.data + opLog.used))[-1];
-	    opLog.id = ((LogHdr *)(opLog.data + opLog.used - back))->id;
-	
-	    dfs_out("Read %d bytes from '%s', last ID %ld\n", stat.st_size, iname, opLog.id);
+	    {
+	      char *data = opLog.data;
+	      char *end = opLog.data + opLog.used;
+	      char *prev = NULL;
+	      while (data < end) {
+		prev = data;
+		data += ((LogHdr *)data)->len;
+	      }
+	      if (prev)
+		opLog.id = ((LogHdr *)prev)->id;
+	      else
+		opLog.id = 0;
+	    }
+	    dfs_out("StartID[%d]\n", opLog.id);
+	    //long	back = ((long *)(opLog.data + opLog.used))[-1];
+	    //opLog.id = ((LogHdr *)(opLog.data + opLog.used - back))->id;
+	    dfs_out("StartID[%d]\n", opLog.id);
+	    int cur_size = stat.st_size;
+	    dfs_out("Read %d bytes from '%s', last ID %d\n", cur_size, iname, opLog.id);
 	}
     }
 
@@ -205,19 +220,24 @@ static void *listen_proc(void *arg)
     while (m = comm_read(c->fd)) {
 	Extent		*ex;
 	char		*sig, *data;
-	dfs_out("Pushed Length[%d]\n", ((LogHdr*)m->data)->len);
 	switch (m->type) {
 	case DFS_MSG_GET_LOG:
 	    {
+		dfs_out("Get wants lock\n");
 		pthread_mutex_lock(&serverMut);
+		dfs_out("Get locked\n");
 		comm_reply(c->fd, m, REPLY_OK, opLog.data, opLog.used, NULL);
 		pthread_mutex_unlock(&serverMut);
+		dfs_out("Get Unlocked\n");
 		break;
 	    }
 	case DFS_MSG_PUSH_LOG:
 	    {
-		dfs_out("Trying to get lock\n");
+	      int cur_len = ((LogHdr*)m->data)->len;
+	      dfs_out("Pushed Length[%d]\n", cur_len);
+		dfs_out("Push wants lock\n");
 		pthread_mutex_lock(&serverMut);
+		dfs_out("Push locked\n");
 		char *start, *stop;
 
 		dfs_out("Col Check\n");
@@ -242,10 +262,11 @@ static void *listen_proc(void *arg)
 			    cur_c = cur_c->next;
 			}
 		    }
+		    dfs_out("Done sending... Flushing server\n");
 		    serverFlush(1);
 		}
-		dfs_out("Unlocking\n");
 		pthread_mutex_unlock(&serverMut);
+		dfs_out("Push Unlocked\n");
 	    }
 	    break;
 	default:

@@ -61,7 +61,7 @@ extern pthread_mutex_t replyLogserverMut;
 extern pthread_cond_t replyLogserverCond;
 pthread_mutex_t treeMut;
 extern Msg			*replyQueue;
-
+int pending_change_id = -1;
 
 // Needed by init
 char *sname = "localhost";
@@ -85,6 +85,7 @@ static void *listener(void *arg)
 	    /* Lock tree and replay log.  Assumes we get the whole log.  */
 	    pthread_mutex_lock(&treeMut);
 	    pthread_mutex_lock(&replyLogserverMut);
+	    dfs_out("Push calling play log\n");
 	    playLog(m->data, m->len);
 	    pthread_mutex_unlock(&replyLogserverMut);
 	    pthread_mutex_unlock(&treeMut);
@@ -759,6 +760,8 @@ static void * dfs_init(struct fuse_conn_info *conn)
 	    }
 	    free(reply);
 	}
+    } else {
+      dfs_die("NO setup client socket to log server at %d on '%s'\n", sport, sname);
     }
     pthread_mutex_unlock(&treeMut);
 }
@@ -839,6 +842,10 @@ void playLog(char *buf, int len)
        pushed then we recieve one log entry and we just
        need to check if we have already committed it.
      */
+    if (pending_change_id == first_version) {
+      dfs_out("PlayLog: Server sent us what we are waiting to commit!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n");
+      return;
+    }
     while (data != NULL && data < end) {
 	int version = ((LogHdr *)data)->id;
 	if (version == first_version) {
@@ -865,6 +872,7 @@ void playLog(char *buf, int len)
 		char		*recipes = (char *)(fv + 1);
 		char		*path = recipes + fv->recipelen;
 		DfsFile	*f;
+		dfs_out("Push[%s] id[%d]\n", path, fv->hdr.id);
 		f = findFile((char *)path);
 		if (f == NULL) {
 		    DfsFile *dir;
@@ -891,7 +899,7 @@ void playLog(char *buf, int len)
 		free(f->recipe);
 		f->recipe = malloc(fv->recipelen);
 		memcpy(f->recipe, recipes, fv->recipelen);
-		dfs_out("Push[%s] version[%d] rlength[%d] recipe[%s] len[%d] dirty[%d]\n", path, f->version, f->recipelen, recipes, f->len, f->dirty);
+		dfs_out("Push[%s] id[%d] version[%d] rlength[%d] recipe[%s] len[%d] dirty[%d]\n", path, fv->hdr.id, f->version, f->recipelen, recipes, f->len, f->dirty);
 	    }
 	    break;
 	case LOG_UNLINK:

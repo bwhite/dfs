@@ -38,6 +38,7 @@ extern pthread_mutex_t		replyLogserverMut;
 extern pthread_cond_t		replyLogserverCond;
 extern pthread_mutex_t treeMut;
 extern void playLog(char *buf, int len);
+extern int pending_change_id;
 
 //=============================================================================
 
@@ -62,9 +63,11 @@ void pushLog(char *from, long len)
 	len += sizeof(double) - (len % sizeof(double));
     ((LogHdr*)from)->len = len;
     *((long*)(from + len - sizeof(long))) = len;
+    pending_change_id = ((LogHdr*)from)->id;
     pthread_mutex_unlock(&treeMut);
     Msg *reply = comm_send_and_reply_mutex(&replyLogserverMut, &replyLogserverCond, opLog.net_fd, DFS_MSG_PUSH_LOG, from, len, NULL);
     pthread_mutex_lock(&treeMut);
+    pending_change_id = -1;
     if (reply->res == REPLY_ERR) {
 	dfs_out("***Collision*** Applying updates\n");
 	playLog(reply->data, reply->len);
