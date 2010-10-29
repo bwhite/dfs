@@ -32,9 +32,63 @@
 #include "tuple.h"
 
 
-int tuple_serialize_log(char **to, size_t *to_len, char *from, size_t from_len)
+int tuple_serialize_log(char **buf, size_t *sz, char *from, size_t from_len)
 {
-
+  /*
+    Args:
+        buf: Where we dump our output
+	sz: Buf size when done
+	from: Where we get our input
+	from_len: Input length
+    TPL Format: Sequence of "iiiiiIIsA(s)" or "iiiiiIs" */
+  tpl_node *tn;
+  char	*end = from + from_len;
+  *buf = NULL;
+  *sz = 0;
+  while (from < end) {
+    char *cur_buf;
+    size_t cur_sz;
+    if (((LogHdr *)from)->type == LOG_FILE_VERSION) {
+      LogFileVersion *l = (LogFileVersion *)from;
+      /* TPL Format: Sequence of "iiiiiIIsA(s)" */
+      /* type, id, version, len, flags, mtime, flen, path, sig* */
+      uint32_t type = l->hdr.type, id = l->hdr.id, version = l->hdr.version, len = l->hdr.len, flags = l->flags;
+      uint64_t mtime = l->mtime, flen = l->flen;
+      char  *recipe = from + sizeof(LogFileVersion);
+      char *path = recipe + l->recipelen;
+      tpl_node *tn;
+      tn = tpl_map(TPL_FORMAT_VERSION, &type, &id, &version, &len, &flags, &mtime, &flen, &path, &recipe);
+      if (tpl_pack(tn, 0) == -1)
+	return -1;
+      while (recipe < path) {
+	if (tpl_pack(tn, 1) == -1)
+	  return -1;
+	recipe += A_HASH_SIZE;
+      }
+      if (tpl_dump(tn, TPL_MEM, &cur_buf, &cur_sz) == -1)
+	return -1;
+      tpl_free(tn);
+    } else {
+      LogOther *l = (LogOther *)from;
+      /* TPL Format: Sequence of "iiiiiIs" */
+      /* type, id, version, len, flags, mtime, path */
+      uint32_t type = l->hdr.type, id = l->hdr.id, version = l->hdr.version, len = l->hdr.len, flags = l->flags;
+      uint64_t mtime = l->mtime;
+      char  *path = from + sizeof(LogOther);
+      tpl_node *tn;
+      tn = tpl_map(TPL_FORMAT_VERSION, &type, &id, &version, &len, &flags, &mtime, &path);
+      if (tpl_pack(tn, 0) == -1)
+	return -1;
+      if (tpl_dump(tn, TPL_MEM, &cur_buf, &cur_sz) == -1)
+	return -1;
+      tpl_free(tn);
+    }
+    *buf = realloc(*buf, *sz + cur_sz);
+    memcpy(*buf, cur_buf, cur_sz);
+    free(cur_buf);
+    *sz += cur_sz;
+  }
+  return 0;
 }
 
 
