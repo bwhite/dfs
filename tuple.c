@@ -48,7 +48,6 @@ int tuple_serialize_log(char **buf, size_t *sz, char *from, size_t from_len)
   while (from < end) {
     char *cur_buf;
     size_t cur_sz;
-    int step;
     if (((LogHdr *)from)->type == LOG_FILE_VERSION) {
       LogFileVersion *l = (LogFileVersion *)from;
       /* TPL Format: Sequence of "iiiiiIIsA(s)" */
@@ -58,14 +57,12 @@ int tuple_serialize_log(char **buf, size_t *sz, char *from, size_t from_len)
       char  *recipe = from + sizeof(LogFileVersion);
       char *path = recipe + l->recipelen;
       tpl_node *tn;
-      step = sizeof(LogFileVersion) + strlen(path) + 1;
       tn = tpl_map(TPL_FORMAT_VERSION, &type, &id, &version, &len, &flags, &mtime, &flen, &path, &recipe);
       if (tpl_pack(tn, 0) == -1)
 	return -1;
       while (recipe < path) {
 	if (tpl_pack(tn, 1) == -1)
 	  return -1;
-	step += A_HASH_SIZE;
 	recipe += A_HASH_SIZE;
       }
       if (tpl_dump(tn, TPL_MEM, &cur_buf, &cur_sz) == -1)
@@ -79,8 +76,7 @@ int tuple_serialize_log(char **buf, size_t *sz, char *from, size_t from_len)
       uint64_t mtime = l->mtime;
       char  *path = from + sizeof(LogOther);
       tpl_node *tn;
-      step = sizeof(logOther) + strlen(path) + 1;
-      tn = tpl_map(TPL_FORMAT_VERSION, &type, &id, &version, &len, &flags, &mtime, &path);
+      tn = tpl_map(TPL_FORMAT_OTHER, &type, &id, &version, &len, &flags, &mtime, &path);
       if (tpl_pack(tn, 0) == -1)
 	return -1;
       if (tpl_dump(tn, TPL_MEM, &cur_buf, &cur_sz) == -1)
@@ -91,7 +87,7 @@ int tuple_serialize_log(char **buf, size_t *sz, char *from, size_t from_len)
     memcpy(*buf + *sz, cur_buf, cur_sz);
     free(cur_buf);
     *sz += cur_sz;
-    from += step;
+    from += ((LogHdr *)from)->len;
   }
   return 0;
 }
@@ -132,12 +128,13 @@ int tuple_unserialize_log_cb(void *from, size_t from_len, void *data) {
     l->hdr.id = id;
     l->hdr.version = version;
     //l->hdr.len = len; Set below
+    
     l->mtime = mtime;
     l->recipelen = recipelen;
     l->flags = flags;
     l->flen = flen;
-    memcpy(l + sizeof(LogFileVersion), recipe, recipelen);
-    memcpy(l + sizeof(LogFileVersion) + recipelen, path, path_len + 1);
+    memcpy((char*)l + sizeof(LogFileVersion), recipe, recipelen);
+    memcpy((char*)l + sizeof(LogFileVersion) + recipelen, path, path_len + 1);
     free(path);
     free(recipe);
   } else {
@@ -152,7 +149,7 @@ int tuple_unserialize_log_cb(void *from, size_t from_len, void *data) {
       return -1;
     tpl_free(tn);
     int path_len = strlen(path);
-    cur_sz = sizeof(LogFileVersion) + path_len + 1 + sizeof(long);
+    cur_sz = sizeof(LogOther) + path_len + 1 + sizeof(long);
     if (cur_sz % sizeof(double))
 	cur_sz += sizeof(double) - (cur_sz % sizeof(double));
     LogFileVersion *l = malloc(cur_sz);
@@ -163,7 +160,7 @@ int tuple_unserialize_log_cb(void *from, size_t from_len, void *data) {
     //l->hdr.len = len; Set below
     l->mtime = mtime;
     l->flags = flags;
-    memcpy(l + sizeof(LogFileVersion), path, path_len + 1);
+    memcpy((char*)l + sizeof(LogOther), path, path_len + 1);
     free(path);
   }
   // Set length
@@ -190,9 +187,11 @@ int tuple_unserialize_log(char **buf, size_t *sz, char *from, size_t from_len)
   buft.used = 0;
   buft.data = NULL;
   tpl_gather_t *gt = NULL;
-  tpl_gather(TPL_GATHER_MEM, from, from_len, &gt, tuple_unserialize_log_cb, &buft);
+  if (tpl_gather(TPL_GATHER_MEM, from, from_len, &gt, tuple_unserialize_log_cb, &buft) < 0)
+    return -1;
   *buf = buft.data;
   *sz = buft.used;
+  return 0;
 }
 
 int tuple_serialize_msg(char **buf, size_t *sz, Msg *m)

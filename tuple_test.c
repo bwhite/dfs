@@ -82,6 +82,28 @@ int msg_test(int seq, int type, int res, int len) {
   return 0;
 }
 
+int log_test(const char* log_fn) {
+  FILE* fp = fopen(log_fn, "r");
+  fseek(fp, 0L, SEEK_END);
+  size_t sz = ftell(fp), out_sz;
+  fseek(fp, 0L, SEEK_SET);
+  char *log = malloc(sz);
+  char *out_log;
+  fread(log, sz, 1, fp);
+  fclose(fp);
+  char *serialized;
+  size_t serialized_sz;  
+  if (tuple_serialize_log(&serialized, &serialized_sz, log, sz))
+    return -1;
+  if (tuple_unserialize_log(&out_log, &out_sz, serialized, serialized_sz))
+    return -1;
+  if (memcmp(log, out_log, sz))
+    return -1;
+  free(serialized);
+  free(out_log);
+  return 0;
+}
+
 int main() {
   assert(sig_test("This is my sig!") == 0);
   assert(sig_test("") == 0);
@@ -95,6 +117,7 @@ int main() {
   assert(msg_test(0, 1, 2, 3) == 0);
   assert(msg_test(0, 0, 0, 0) == 0);
   assert(msg_test(-1, -1, -1, -1) == 0);
+  assert(log_test("LOG_SERVER000") == 0);
   printf("Tests Passed!\n");
   return 0;
 }
