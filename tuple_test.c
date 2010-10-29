@@ -1,7 +1,11 @@
-#include "tuple.h"
-#include "comm.h"
 #include <stdio.h>
 #include <stdlib.h>
+#include <sys/stat.h>
+#include "tuple.h"
+#include "comm.h"
+#include "utils.h"
+#include "dfs.h"
+#include "log.h"
 
 int sig_test(char *sig) {
   char *serialized;
@@ -88,7 +92,7 @@ int log_test(const char* log_fn) {
   size_t sz = ftell(fp), out_sz;
   fseek(fp, 0L, SEEK_SET);
   char *log = malloc(sz);
-  char *out_log;
+  char *out_log, *out_log2;
   fread(log, sz, 1, fp);
   fclose(fp);
   char *serialized;
@@ -97,10 +101,64 @@ int log_test(const char* log_fn) {
     return -1;
   if (tuple_unserialize_log(&out_log, &out_sz, serialized, serialized_sz))
     return -1;
-  if (memcmp(log, out_log, sz))
+  if (out_sz != sz)
     return -1;
+  out_log2 = out_log;
+  // Compare entry by entry
+  char	*end = log + sz;
+  while (log < end) {
+    if (((LogHdr *)log)->type == LOG_FILE_VERSION) {
+      LogFileVersion	*l0 = (LogFileVersion *)log;
+      char		*recipes0 = (char *)(l0 + 1);
+      char		*path0 = recipes0 + l0->recipelen;
+
+      LogFileVersion	*l1 = (LogFileVersion *)out_log;
+      char		*recipes1 = (char *)(l1 + 1);
+      char		*path1 = recipes1 + l1->recipelen;
+      if (strcmp(path0, path1) != 0 ||
+	 strcmp(recipes0, recipes1) != 0)
+	return -1;
+      if (l0->hdr.type != l1->hdr.type ||
+	  l0->hdr.id != l1->hdr.id ||
+	  l0->hdr.version != l1->hdr.version ||
+	  l0->hdr.len != l1->hdr.len ||
+	  l0->mtime != l1->mtime ||
+	  l0->recipelen != l1->recipelen ||
+	  l0->flags != l1->flags ||
+	  l0->flen != l1->flen ||
+	  *((long*)((((char*)l0) + l0->hdr.len) - sizeof(long))) != *((long*)((((char*)l1) + l1->hdr.len) - sizeof(long))))
+	return -1;
+    } else {
+      LogOther	*l0 = (LogOther *)log;
+      char		*path0 = (char *)(l0 + 1);
+
+      LogOther	*l1 = (LogOther *)out_log;
+      char		*path1 = (char *)(l1 + 1);
+      if (strcmp(path0, path1) != 0)
+	return -1;
+      if (l0->hdr.type != l1->hdr.type ||
+	  l0->hdr.id != l1->hdr.id ||
+	  l0->hdr.version != l1->hdr.version ||
+	  l0->hdr.len != l1->hdr.len ||
+	  l0->mtime != l1->mtime ||
+	  l0->flags != l1->flags ||
+	  *((long*)((((char*)l0) + l0->hdr.len) - sizeof(long))) != *((long*)((((char*)l1) + l1->hdr.len) - sizeof(long))))
+	return -1;
+    }
+    log += ((LogHdr *)log)->len;
+    out_log += ((LogHdr *)out_log)->len;
+  }
+    /*
+  {
+    FILE *fp_out = fopen("tuple_test_out.log", "w");
+    fwrite(out_log, out_sz, 1, fp_out);
+    fclose(fp_out);
+  }
+    */
+  //if (memcmp(log, out_log, sz))
+  //  return -1;
   free(serialized);
-  free(out_log);
+  free(out_log2);
   return 0;
 }
 
@@ -117,7 +175,7 @@ int main() {
   assert(msg_test(0, 1, 2, 3) == 0);
   assert(msg_test(0, 0, 0, 0) == 0);
   assert(msg_test(-1, -1, -1, -1) == 0);
-  assert(log_test("LOG_SERVER000") == 0);
+  assert(log_test("LOG_SERVER000_TEST0") == 0);
   printf("Tests Passed!\n");
   return 0;
 }

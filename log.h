@@ -6,6 +6,7 @@ typedef struct {
     int			id;
     int			version;
     long		len;
+    in_addr_t		creator;	// ip addr
 } LogHdr;
 
 

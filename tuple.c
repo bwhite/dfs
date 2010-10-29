@@ -128,7 +128,7 @@ int tuple_unserialize_log_cb(void *from, size_t from_len, void *data) {
     l->hdr.id = id;
     l->hdr.version = version;
     //l->hdr.len = len; Set below
-    
+    l->hdr.creator = 0;
     l->mtime = mtime;
     l->recipelen = recipelen;
     l->flags = flags;
@@ -152,7 +152,7 @@ int tuple_unserialize_log_cb(void *from, size_t from_len, void *data) {
     cur_sz = sizeof(LogOther) + path_len + 1 + sizeof(long);
     if (cur_sz % sizeof(double))
 	cur_sz += sizeof(double) - (cur_sz % sizeof(double));
-    LogFileVersion *l = malloc(cur_sz);
+    LogOther *l = malloc(cur_sz);
     cur_buf = l;
     l->hdr.type = type;
     l->hdr.id = id;
