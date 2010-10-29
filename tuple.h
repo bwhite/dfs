@@ -19,7 +19,6 @@
 // Pass to callback through opaque pointer.
 typedef struct {
     long	used;
-    long	alloced;
     char	*data;
 } BufT;
 
