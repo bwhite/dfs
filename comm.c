@@ -4,7 +4,7 @@
 #include <string.h>
 #include <pthread.h>
 #include "comm.h"
-
+#include	"tuple.h"
 
 #define SOCKET_ERROR    -1
 #define QUEUE_SIZE      5
@@ -20,8 +20,23 @@ static CommStats	*commStats;
 static pthread_mutex_t	statsMut = PTHREAD_MUTEX_INITIALIZER;
 pthread_mutex_t			replyLogserverMut = PTHREAD_MUTEX_INITIALIZER;
 pthread_cond_t			replyLogserverCond = PTHREAD_COND_INITIALIZER;
+int serialized_msg_hdr_len = -1; /* The comm libary needs to know the size of the serialized msg header
+				    as it is no longer the same size as Msg, we compute this once */
 
-
+void compute_serialized_msg_hdr_len() {
+  if (serialized_msg_hdr_len != -1)
+    return;
+  Msg in_msg;
+  char *serialized;
+  size_t serialized_sz;  
+  in_msg.seq = 0;
+  in_msg.type = 0;
+  in_msg.res = 0;
+  in_msg.len = 0;
+  assert(!tuple_serialize_msg(&serialized, &serialized_sz, &in_msg));
+  free(serialized);
+  serialized_msg_hdr_len = serialized_sz;
+}
 
 
 static void comm_stats()

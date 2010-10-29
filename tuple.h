@@ -10,7 +10,7 @@
 #define	TPL_FORMAT_OTHER	"iiiiiIs"      /* type, id, version, len, flags, mtime, path */
 
 // message formats
-#define	TPL_FORMAT_MSG_HDR	"iiii" 		/* type, id, version, len */
+#define	TPL_FORMAT_MSG_HDR	"iiii" 		/* seq, type, res, len */
 #define	TPL_FORMAT_SIG		"s"
 #define	TPL_FORMAT_EXTENT	"B"
 #define	TPL_FORMAT_SIG_EXTENT	"sB"

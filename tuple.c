@@ -32,26 +32,16 @@
 #include "tuple.h"
 
 
-
-
 int tuple_serialize_log(char **to, size_t *to_len, char *from, size_t from_len)
 {
+
 }
 
 
 int tuple_unserialize_log(char **to, size_t *to_len, char *from, size_t from_len)
 {
-}
 
-/*
-typedef struct Msg {
-    int		seq;
-    int		type;
-    int		res;
-    int		len;				// of data, not including Msg
-    char	data[];
-} Msg;
- */
+}
 
 int tuple_serialize_msg(char **buf, size_t *sz, Msg *m)
 {
@@ -61,8 +51,9 @@ int tuple_serialize_msg(char **buf, size_t *sz, Msg *m)
 	sz: Buf size when done
 	m: Message
     TPL Format: "iiii" */
+  uint32_t seq = m->seq, type = m->type, res = m->res, len = m->len;
   tpl_node *tn;
-  tn = tpl_map(TPL_FORMAT_MSG_HDR, &(m->seq), &(m->type), &(m->res), &(m->len));
+  tn = tpl_map(TPL_FORMAT_MSG_HDR, &seq, &type, &res, &len);
   if (tpl_pack(tn, 0) == -1)
     return -1;
   if (tpl_dump(tn, TPL_MEM, buf, sz) == -1)
@@ -81,12 +72,17 @@ int tuple_unserialize_msg(char *in, size_t insz, Msg *m)
 	m: Message
     TPL Format: "iiii" */
   tpl_node *tn;
-  tn = tpl_map(TPL_FORMAT_MSG_HDR, &(m->seq), &(m->type), &(m->res), &(m->len));
+  uint32_t seq, type, res, len;
+  tn = tpl_map(TPL_FORMAT_MSG_HDR, &seq, &type, &res, &len);
   if (tpl_load(tn, TPL_MEM, in, insz) == -1)
     return -1;
   if (tpl_unpack(tn, 0) == -1)   /* allocates space */
     return -1;
   tpl_free(tn);
+  m->seq = seq;
+  m->type = type;
+  m->res = res;
+  m->len = len;
   return 0;
 }
 

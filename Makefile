@@ -31,7 +31,7 @@ logServer: logServer.o comm.o utils.o tuple.o
 logServer.o: logServer.c $(HEADERS)
 
 
-tuple_test: tuple_test.o tuple.o utils.o
+tuple_test: tuple_test.o tuple.o utils.o comm.o
 	$(CC) -o $@ $(CFLAGS) $^ $(LIBS)
 
 tuple_test.o: tuple_test.c $(HEADERS)

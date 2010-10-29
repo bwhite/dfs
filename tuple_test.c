@@ -1,4 +1,5 @@
 #include "tuple.h"
+#include "comm.h"
 #include <stdio.h>
 #include <stdlib.h>
 
@@ -61,6 +62,26 @@ int sig_extent_test(char *sig, char *ex, size_t exsz) {
   return 0;
 }
 
+int msg_test(int seq, int type, int res, int len) {
+  char *serialized;
+  size_t serialized_sz;  
+  Msg in_msg, out_msg;
+  in_msg.seq = seq;
+  in_msg.type = type;
+  in_msg.res = res;
+  in_msg.len = len;
+  if (tuple_serialize_msg(&serialized, &serialized_sz, &in_msg))
+    return -1;
+  if (tuple_unserialize_msg(serialized, serialized_sz, &out_msg))
+    return -1;
+  printf("%d %d %d %d | %d %d %d %d\n", in_msg.seq, in_msg.type, in_msg.res, in_msg.len,
+	 out_msg.seq, out_msg.type, out_msg.res, out_msg.len);
+  if (out_msg.seq != seq || out_msg.type != type || out_msg.res != res || out_msg.len != len)
+    return -1;
+  free(serialized);
+  return 0;
+}
+
 int main() {
   assert(sig_test("This is my sig!") == 0);
   assert(sig_test("") == 0);
@@ -71,6 +92,9 @@ int main() {
   assert(sig_extent_test("sdfsdfsfd", "\0\0\0", 3) == 0);
   assert(sig_extent_test("", "", 0) == 0);
   assert(sig_extent_test("dfse332 ", "sfsdf\01", 7) == 0);
+  assert(msg_test(0, 1, 2, 3) == 0);
+  assert(msg_test(0, 0, 0, 0) == 0);
+  assert(msg_test(-1, -1, -1, -1) == 0);
   printf("Tests Passed!\n");
   return 0;
 }
