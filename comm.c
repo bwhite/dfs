@@ -197,16 +197,18 @@ Msg *comm_read(int sock) {
     Msg		hdr, *m;
     int		res;
     char	*p, *pend;
-
-    //    dfs_out("About to BLOCK on READ\n");
-    if (0 > (res = recv(sock, (char *)&hdr, sizeof(hdr), MSG_PEEK)))
+    compute_serialized_msg_hdr_len();
+    char *serialized = malloc(serialized_msg_hdr_len);
+    //dfs_out("About to BLOCK on READ\n");
+    if (0 > (res = recv(sock, (char *)serialized, serialized_msg_hdr_len, MSG_PEEK)))
 	dfs_die("recv error in read_msg\n");
     if (!res) {
 	dfs_out("SOCKET CLOSED AT OTHER END\n");
 	close(sock);
 	return NULL;
     }
-
+    tuple_unserialize_msg(serialized, serialized_msg_hdr_len, &hdr);
+    free(serialized);
     dfs_out("PEEK %d\n", hdr.len);
     m = (Msg *)malloc(sizeof(Msg) + hdr.len);
     assert(m);
@@ -248,11 +250,17 @@ int comm_send_prim(int sock, int type, int result, int seq, va_list ap) {
 	totallen += va_arg(ap, int);
 	num++;
     }
+    m.type = type;
+    m.len = totallen;
+    m.seq = seq;
+    m.res = result;
 
     vecs = (struct iovec *)malloc(sizeof(struct iovec) * num);
-
-    vecs[i].iov_base = (char *)&m;
-    vecs[i++].iov_len = sizeof(m);
+    char* serialized;
+    size_t serialized_sz;
+    tuple_serialize_msg(&serialized, &serialized_sz, &m);
+    vecs[i].iov_base = serialized;
+    vecs[i++].iov_len = serialized_sz;
 
     while (data = va_arg(ap2, char *)) {
 	vecs[i].iov_base = data;
@@ -264,11 +272,6 @@ int comm_send_prim(int sock, int type, int result, int seq, va_list ap) {
     memset((char *)&mhdr, 0, sizeof(mhdr));
     mhdr.msg_iov = vecs;
     mhdr.msg_iovlen = num;
-
-    m.type = type;
-    m.len = totallen;
-    m.seq = seq;
-    m.res = result;
     {
 	int cnt;
 	for (cnt = 0; cnt < num; cnt++) {
@@ -286,7 +289,7 @@ int comm_send_prim(int sock, int type, int result, int seq, va_list ap) {
 	return -1;
     }
     free(vecs);
-
+    free(serialized);
     dfs_out("Sent msg type '%s' (res %d), %d bytes on %d, seq %d\n", messageStr(type), result, res, sock, m.seq);
     return res;
 }
@@ -320,8 +323,11 @@ int comm_sendmsg(int sock, int type, struct msghdr *min)
     int			res;
     Msg			m;
     
-    vecs[0].iov_base = (char *)&m;
-    vecs[i].iov_len = sizeof(m);
+    char* serialized;
+    size_t serialized_sz;
+    tuple_serialize_msg(&serialized, &serialized_sz, &m);
+    vecs[0].iov_base = serialized;
+    vecs[i].iov_len = serialized_sz;
 
     for (i = 0; i < min->msg_iovlen; i++) {
 	vecs[i + 1] = min->msg_iov[i];
@@ -340,6 +346,7 @@ int comm_sendmsg(int sock, int type, struct msghdr *min)
     if (0 > (res = sendmsg(sock, &mhdr, 0))) 
 	dfs_die("No send msg type %d\n", type);
     free(vecs);
+    free(serialized);
 
     if (commStats) {
 	pthread_mutex_lock(&statsMut);

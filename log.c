@@ -65,12 +65,20 @@ void pushLog(char *from, long len)
     *((long*)(from + len - sizeof(long))) = len;
     pending_change_id = ((LogHdr*)from)->id;
     pthread_mutex_unlock(&treeMut);
-    Msg *reply = comm_send_and_reply_mutex(&replyLogserverMut, &replyLogserverCond, opLog.net_fd, DFS_MSG_PUSH_LOG, from, len, NULL);
+    char *serialized;
+    size_t serialized_sz;  
+    tuple_serialize_log(&serialized, &serialized_sz, from, len);
+    Msg *reply = comm_send_and_reply_mutex(&replyLogserverMut, &replyLogserverCond, opLog.net_fd, DFS_MSG_PUSH_LOG, serialized, serialized_sz, NULL);
     pthread_mutex_lock(&treeMut);
+    free(serialized);
     pending_change_id = -1;
     if (reply->res == REPLY_ERR) {
 	dfs_out("***Collision*** Applying updates\n");
-	playLog(reply->data, reply->len);
+	char *log;
+	size_t log_sz;
+	assert(tuple_unserialize_log(&log, &log_sz, reply->data, reply->len) == 0);
+	playLog(log, log_sz);
+	free(log);
     } else {
 	checkLogSpace(len);
 	memcpy(opLog.data + opLog.used, from, len);

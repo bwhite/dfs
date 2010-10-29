@@ -86,7 +86,11 @@ static void *listener(void *arg)
 	    pthread_mutex_lock(&treeMut);
 	    pthread_mutex_lock(&replyLogserverMut);
 	    dfs_out("Push calling play log\n");
-	    playLog(m->data, m->len);
+	    char *log;
+	    size_t log_sz;
+	    assert(tuple_unserialize_log(&log, &log_sz, m->data, m->len) == 0);
+	    playLog(log, log_sz);
+	    free(log);
 	    pthread_mutex_unlock(&replyLogserverMut);
 	    pthread_mutex_unlock(&treeMut);
 	    break;
@@ -199,25 +203,30 @@ Extent	*get_extent(char *sig)
     Extent 	*ex;
 
     assert(sig);
-
-    Msg	*reply = comm_send_and_reply(extentSock, DFS_MSG_GET_EXTENT, sig, A_HASH_SIZE, NULL);
-
+    char *serialized;
+    size_t serialized_sz;
+    assert(tuple_serialize_sig(&serialized, &serialized_sz, sig) == 0);
+    Msg	*reply = comm_send_and_reply(extentSock, DFS_MSG_GET_EXTENT, serialized, serialized_sz, NULL);
+    free(serialized);
     if (!reply || (reply->res != REPLY_OK)) 
 	return NULL;
     assert(reply->len);
-
-    ex = malloc(sizeof(Extent) + reply->len);
+    char *unserialized;
+    size_t unserialized_sz;
+    assert(tuple_unserialize_extent(&unserialized, &unserialized_sz, reply->data, reply->len) == 0);
+    ex = malloc(sizeof(Extent) + unserialized_sz);
     assert(ex);
 
     // verify sig
-    char *s = hash_bytes(reply->data, reply->len);
+    char *s = hash_bytes(unserialized, unserialized_sz);
     strcpy(ex->sig, s);
     free(s);
 
-    memcpy(ex->data, reply->data, reply->len);
-    ex->sz = reply->len;
+    memcpy(ex->data, unserialized, unserialized_sz);
+    ex->sz = unserialized_sz;
 
     free(reply);
+    free(unserialized);
 
     return ex;
 }
@@ -229,11 +238,13 @@ int	poll_extent(char *sig)
     Extent 	*ex;
 
     assert(sig);
-
-    Msg	*reply = comm_send_and_reply(extentSock, DFS_MSG_POLL_EXTENT, sig, A_HASH_SIZE, NULL);
-
+    char *serialized;
+    size_t serialized_sz;
+    assert(tuple_serialize_sig(&serialized, &serialized_sz, sig) == 0);
+    Msg	*reply = comm_send_and_reply(extentSock, DFS_MSG_POLL_EXTENT, serialized, serialized_sz, NULL);
     int ret =  (reply && (reply->res == REPLY_OK));
     free(reply);
+    free(serialized);
     return ret;
 }
 
@@ -251,8 +262,11 @@ char *put_extent(char *buf, long sz)
 	printf("Server already has EXTENT\n");
 	return s;
     }
-
-    Msg	*reply = comm_send_and_reply(extentSock, DFS_MSG_PUT_EXTENT, s, A_HASH_SIZE, buf, sz, NULL);
+    char *serialized;
+    size_t serialized_sz;
+    assert(tuple_serialize_sig_extent(s, &serialized, &serialized_sz, buf, sz) == 0);
+    Msg	*reply = comm_send_and_reply(extentSock, DFS_MSG_PUT_EXTENT, serialized, serialized_sz, NULL);
+    free(serialized);
     if (!reply) dfs_die("No get reply\n");
 
     dfs_out("extent '%s' CREATED\n", s);

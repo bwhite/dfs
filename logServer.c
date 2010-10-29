@@ -226,47 +226,58 @@ static void *listen_proc(void *arg)
 		dfs_out("Get wants lock\n");
 		pthread_mutex_lock(&serverMut);
 		dfs_out("Get locked\n");
-		comm_reply(c->fd, m, REPLY_OK, opLog.data, opLog.used, NULL);
+		{
+		  char *serialized;
+		  size_t serialized_sz;  
+		  tuple_serialize_log(&serialized, &serialized_sz, opLog.data, opLog.used);
+		  comm_reply(c->fd, m, REPLY_OK, serialized, serialized_sz, NULL);
+		  free(serialized);
+		}
 		pthread_mutex_unlock(&serverMut);
 		dfs_out("Get Unlocked\n");
 		break;
 	    }
 	case DFS_MSG_PUSH_LOG:
 	    {
-	      int cur_len = ((LogHdr*)m->data)->len;
-	      dfs_out("Pushed Length[%d]\n", cur_len);
-		dfs_out("Push wants lock\n");
-		pthread_mutex_lock(&serverMut);
-		dfs_out("Push locked\n");
-		char *start, *stop;
 
-		dfs_out("Col Check\n");
-		if (check_collision(m, &start, &stop)) {
-		    dfs_out("***Collision***\n");
-		    comm_reply(c->fd, m, REPLY_ERR, start, stop - start, NULL);
-		} else {
-		    comm_reply(c->fd, m, REPLY_OK, NULL);
-		    // Append to log
-		    ((LogHdr *)m->data)->id = ++opLog.id; // Forces all commits to be sequential
-		    dfs_out("Record gets id[%d]\n", opLog.id);
-		    checkLogSpace(m->len);
-		    memcpy(opLog.data + opLog.used, m->data, m->len);
-		    opLog.used = opLog.used + m->len;
-		    if (push_updates){
-			// flush to other clients
-			dfs_out("Outside while\n");
-			Client *cur_c = my_clients;
-			while(cur_c != NULL) {
-			    dfs_out("Sending again[%p]...\n", cur_c);
-			    comm_send(cur_c->fd, DFS_MSG_PUSH_LOG, m->data, m->len, NULL);
-			    cur_c = cur_c->next;
-			}
-		    }
-		    dfs_out("Done sending... Flushing server\n");
-		    serverFlush(1);
+	      char *log;
+	      size_t log_sz;
+	      assert(tuple_unserialize_log(&log, &log_sz, m->data, m->len) == 0);
+	      int cur_len = ((LogHdr*)log)->len;
+	      dfs_out("Pushed Length[%d]\n", cur_len);
+	      dfs_out("Push wants lock\n");
+	      pthread_mutex_lock(&serverMut);
+	      dfs_out("Push locked\n");
+	      char *start, *stop;	      
+	      dfs_out("Col Check\n");
+	      if (check_collision(m, &start, &stop)) {
+		dfs_out("***Collision***\n");
+		comm_reply(c->fd, m, REPLY_ERR, start, stop - start, NULL);
+	      } else {
+		comm_reply(c->fd, m, REPLY_OK, NULL);
+		// Append to log
+		((LogHdr *)log)->id = ++opLog.id; // Forces all commits to be sequential
+		dfs_out("Record gets id[%d]\n", opLog.id);
+		checkLogSpace(log_sz);
+		memcpy(opLog.data + opLog.used, log, log_sz);
+		opLog.used = opLog.used + log_sz;
+		if (push_updates){
+		  // flush to other clients
+		  dfs_out("Outside while\n");
+		  Client *cur_c = my_clients;
+		  while(cur_c != NULL) {
+		    dfs_out("Sending again[%p]...\n", cur_c);
+		    // Send serialized version
+		    comm_send(cur_c->fd, DFS_MSG_PUSH_LOG, m->data, m->len, NULL);
+		    cur_c = cur_c->next;
+		  }
 		}
-		pthread_mutex_unlock(&serverMut);
-		dfs_out("Push Unlocked\n");
+		dfs_out("Done sending... Flushing server\n");
+		serverFlush(1);
+	      }
+	      pthread_mutex_unlock(&serverMut);
+	      dfs_out("Push Unlocked\n");
+	      free(log);
 	    }
 	    break;
 	default:
