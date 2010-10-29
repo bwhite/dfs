@@ -12,6 +12,7 @@
 #include	"comm.h"
 #include	<search.h>
 #include	<dirent.h>
+#include	"tuple.h"
 
 void 		ex_put_extent(char *buf, long sz);
 int 		ex_poll_extent(char *sig);
@@ -21,6 +22,7 @@ Extent		*ex_get_extent(char *sig);
 static char 	*xstorage = ".extents";
 static void 	*extentRoot = NULL;
 static char	*saveDir = NULL;
+int		serialize = 1;
 
 void 	read_extents();
 void 	flush_extents();
@@ -38,7 +40,7 @@ static void extent_print(const void *node, VISIT order, int level) {
 }
 
 
-void *listen_proc(void *arg) 
+void *listener(void *arg) 
 {
     Client	*c = arg;
 
@@ -53,28 +55,39 @@ void *listen_proc(void *arg)
 
 	switch (m->type) {
 	case DFS_MSG_GET_EXTENT:
-	    if (ex = ex_get_extent(m->data))
-		comm_reply(c->fd, m, REPLY_OK, ex->data, ex->sz, NULL);
-	    else
+	    if (tuple_unserialize_sig(&sig, m->data, m->len))
+		comm_reply(c->fd, m, REPLY_ERR, NULL);
+	    else if (ex = ex_get_extent(sig)) {
+		char	*buf;
+		size_t	sz;
+		tuple_serialize_extent(&buf, &sz, ex->data, ex->sz);
+		comm_reply(c->fd, m, REPLY_OK, buf, sz, NULL);
+		free(buf);
+	    } else
 		comm_reply(c->fd, m, REPLY_ERR, NULL);
 	    break;
 
 	case DFS_MSG_POLL_EXTENT:
-	    if (ex_poll_extent(m->data))
+	    if (tuple_unserialize_sig(&sig, m->data, m->len))
+		comm_reply(c->fd, m, REPLY_ERR, NULL);
+	    else if (ex_poll_extent(sig))
 		comm_reply(c->fd, m, REPLY_OK, NULL);
 	    else
 		comm_reply(c->fd, m, REPLY_ERR, NULL);
 	    break;
 
 	case DFS_MSG_PUT_EXTENT:
-	    if (m->len <= A_HASH_SIZE) {
-		comm_reply(c->fd, m, REPLY_ERR, NULL);
-	    } else {
-		sig = m->data;
-		data = m->data + A_HASH_SIZE;
+	    {
+		size_t		sz;
 
-		comm_reply(c->fd, m, REPLY_OK, NULL);
-		ex_put_extent(data, m->len - A_HASH_SIZE);
+		if (tuple_unserialize_sig_extent(&sig, &data, &sz, m->data, m->len)) {
+		    comm_reply(c->fd, m, REPLY_ERR, NULL);
+		} else {
+		    comm_reply(c->fd, m, REPLY_OK, NULL);
+		    ex_put_extent(data, sz);
+		    free(sig);
+		    free(data);
+		}
 	    }
 	    break;
 	default:
@@ -86,7 +99,7 @@ void *listen_proc(void *arg)
 
     dfs_out("\n\tLISTEN PROC EXIT, sock %d! (id %d, tid %d)\n\n", c->fd, c->id, c->tid);
 
-    twalk(extentRoot, extent_print);
+    //    twalk(extentRoot, extent_print);
 
     flush_extents();
 
@@ -156,8 +169,6 @@ void ex_put_extent(char *buf, long sz)
     wrapped_tsearch(ex, &extentRoot, extent_compare);
 
     dfs_out("extent '%s' CREATED\n", sig);
-    flush_extents();
-    dfs_out("flushing");
     free(sig);
 }
 
@@ -187,15 +198,34 @@ void read_extents()
 
 		printf(".");
 		if ((fd = open(fname, O_RDONLY)) > 0) {
-		    Extent	*ex = malloc(sizeof(Extent) + 1 + BLOCK_SIZE);
-		    int		len = read(fd, ex->data, BLOCK_SIZE + 1);
+		    struct stat		stat;
 
-		    assert(len && (len <= BLOCK_SIZE));
+		    fstat(fd, &stat);
+
+		    Extent	*ex = malloc(sizeof(Extent) + stat.st_size);
+		    int		len = read(fd, ex->data, stat.st_size);
+		    ex->sz = len;
+
+		    assert(len);
 		    close(fd);
 
+		    if (serialize) {
+			char		*buf;
+			size_t		sz;
+
+			tuple_unserialize_extent(&buf, &sz, ex->data, len);
+			free(ex);
+			ex = malloc(sizeof(Extent) + sz);
+			ex->sz = sz;
+			memcpy(ex->data, buf, sz);
+			free(buf);
+		    }
+
 		    strcpy(ex->sig, ent->d_name);  
-		    ex->sz = len;
 		    
+		    char *s = hash_bytes(ex->data, ex->sz);
+		    //assert(!strcmp(s, ex->sig));
+
 		    // insert that puppy. don't worry about dups because this is initialization
 		    wrapped_tsearch((void *)ex, &extentRoot, extent_compare);
 		}
@@ -222,8 +252,13 @@ static void extent_save(const void *node, VISIT order, int level) {
 	// if not there yet
 	if (stat(fname, &dummy)) {
 	    if ((fd = open(fname, O_WRONLY | O_TRUNC | O_CREAT, 0644)) > 0) {
-		write(fd, ex->data, ex->sz);
+		char		*buf;
+		size_t		sz;
+
+		tuple_serialize_extent(&buf, &sz, ex->data, ex->sz);
+		write(fd, buf, sz);
 		close(fd);
+		free(buf);
 	    } else {
 		printf("No write '%s'\n", ex->sig);
 	    }
@@ -246,8 +281,11 @@ int main(int argc, char *argv[])
 {
     int		c, port = EXTENT_PORT;
 
-    while ((c = getopt(argc, argv, "p:x:")) != -1) {
+    while ((c = getopt(argc, argv, "dp:x:")) != -1) {
 	switch (c) {
+	case 'd':
+	    dfsbug = 1 - dfsbug;
+	    break;
 	case 'p':
 	    port = atoi(optarg);
 	    break;
@@ -255,7 +293,7 @@ int main(int argc, char *argv[])
 	    xstorage = strdup(optarg);
 	    break;
 	default:
-	    fprintf(stderr, "USAGE: %s [-p <#>] [-x <extent dir>]\n", argv[0]);
+	    fprintf(stderr, "USAGE: %s [-d] [-p <#>] [-x <both dirs>]\n", argv[0]);
 	    exit(1);
 	}
     }
@@ -266,6 +304,6 @@ int main(int argc, char *argv[])
 
     printf("Extent store in '%s', port %d\n", xstorage, port);
 
-    comm_server_socket_mt(EXTENT_PORT, listen_proc);
+    comm_server_socket_mt(EXTENT_PORT, listener);
 }
   

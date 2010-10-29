@@ -4,49 +4,51 @@ CFLAGS = -D_FILE_OFFSET_BITS=64 -g -O0
 UNAME := $(shell uname)
 
 ifeq ($(UNAME),Darwin)
-LIBS =  -lfuse_ino64 -L/opt/local/lib -lgcrypt -lpthread
+LIBS =  -lfuse_ino64 -L/opt/local/lib -lgcrypt -lpthread -ltpl
 CFLAGS += -DDARWIN -I/opt/local/include
 endif
 
 ifeq ($(UNAME),Linux)
-LIBS =  -lfuse -lgcrypt -lpthread
+LIBS =  -lfuse -lgcrypt -lpthread -ltpl
 CFLAGS += -DLINUX
 endif
 
-TARGETS = dfs extent printLog logServer
+TARGETS = dfs extent printLog logServer tuple_test
+
+HEADERS =  dfs.h utils.h comm.h log.h tuple.h
 
 all: $(TARGETS)
 
 
-extent: extent.o comm.o utils.o comm.o
+extent: extent.o comm.o utils.o comm.o tuple.o
 	$(CC) -o $@ $(CFLAGS) $^ $(LIBS)
 
-extent.o: extent.c dfs.h utils.h comm.h
+extent.o: extent.c $(HEADERS)
 
-logServer: logServer.o comm.o utils.o 
+logServer: logServer.o comm.o utils.o tuple.o
 	$(CC) -o $@ $(CFLAGS) $^ $(LIBS)
 
-logServer.o: logServer.c dfs.h utils.h log.h
+logServer.o: logServer.c $(HEADERS)
 
 
-# example for 'tsearch()'
-ts: ts.o
+tuple_test: tuple_test.o tuple.o utils.o
 	$(CC) -o $@ $(CFLAGS) $^ $(LIBS)
 
-ts.o: ts.c dfs.h
+tuple_test.o: tuple_test.c $(HEADERS)
 
+dfs: dfs.o utils.o comm.o log.o tuple.o
+	$(CC) -o $@ $(CFLAGS) $^ $(LIBS) `pkg-config --cflags --libs protobuf`
 
-dfs: dfs.o utils.o comm.o log.o
+dfs.o: dfs.c $(HEADERS)
+
+tuple.o: tuple.c $(HEADERS)
+
+printLog: printLog.o utils.o tuple.o
 	$(CC) -o $@ $(CFLAGS) $^ $(LIBS)
 
-dfs.o: dfs.c dfs.h utils.h comm.h log.h
+printLog.o: printLog.c
 
-printLog: printLog.o utils.o
-	$(CC) -o $@ $(CFLAGS) $^ $(LIBS)
-
-printLog.o: printLog.c dfs.h utils.h comm.h log.h
-
-log.o: log.c dfs.h utils.h comm.h log.h
+log.o: log.c $(HEADERS)
 
 comm.o: comm.c comm.h utils.h
 

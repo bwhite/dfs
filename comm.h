@@ -33,7 +33,6 @@ typedef struct Msg {
     int		type;
     int		res;
     int		len;				// of data, not including Msg
-    struct Msg	*next;				// used for MT handoff
     char	data[];
 } Msg;
 
