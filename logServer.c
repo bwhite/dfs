@@ -144,17 +144,17 @@ static void receiveLog(Client *c, Msg *m)
 }
 */
 
-int check_collision(Msg *m, char **start, char **stop) {
+int check_collision(int type, char *m_data, char **start, char **stop) {
     char *data = opLog.data;
     char *end = opLog.data + opLog.used;
     char *path;
     int version;
-    if (m->type == LOG_FILE_VERSION) {
-	LogFileVersion *fv = (LogFileVersion*)(m->data);
+    if (type == LOG_FILE_VERSION) {
+	LogFileVersion *fv = (LogFileVersion*)(m_data);
 	path = ((char *)(fv + 1)) + fv->recipelen;
 	version = fv->hdr.id;
     } else {
-	LogOther *fv = (LogOther*)(m->data);
+	LogOther *fv = (LogOther*)(m_data);
 	path = ((char *)(fv + 1));
 	version = fv->hdr.id;
     }
@@ -262,7 +262,7 @@ static void *listen_proc(void *arg)
 	      dfs_out("Push locked\n");
 	      char *start, *stop;	      
 	      dfs_out("Col Check\n");
-	      if (check_collision(m, &start, &stop)) {
+	      if (check_collision(m->type, log, &start, &stop)) {
 		dfs_out("***Collision***\n");
 		comm_reply(c->fd, m, REPLY_ERR, start, stop - start, NULL);
 	      } else {
