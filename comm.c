@@ -200,7 +200,7 @@ Msg *comm_read(int sock) {
     compute_serialized_msg_hdr_len();
     char *serialized = malloc(serialized_msg_hdr_len);
     //dfs_out("About to BLOCK on READ\n");
-    if (0 > (res = recv(sock, (char *)serialized, serialized_msg_hdr_len, MSG_PEEK)))
+    if (0 > (res = recv(sock, (char *)serialized, serialized_msg_hdr_len, 0)))
 	dfs_die("recv error in read_msg\n");
     if (!res) {
 	dfs_out("SOCKET CLOSED AT OTHER END\n");
@@ -212,11 +212,11 @@ Msg *comm_read(int sock) {
     dfs_out("PEEK %d\n", hdr.len);
     m = (Msg *)malloc(sizeof(Msg) + hdr.len);
     assert(m);
-
-    p = (char *)m;
-    pend = p + sizeof(Msg) + hdr.len;
+    memcpy(m, &hdr, sizeof(Msg));
+    p = ((char *)m) + sizeof(Msg);
+    pend = p + hdr.len;
     while (p < pend) {
-	if (0 > (res = recv(sock, p, pend - p, 0)))
+      if (0 > (res = recv(sock, p, hdr.len, 0)))
 	    dfs_die("readfrom error in SAGR");
 	dfs_out("read %d\n", res);
 	p += res;
@@ -323,17 +323,16 @@ int comm_sendmsg(int sock, int type, struct msghdr *min)
     int			res;
     Msg			m;
     
-    char* serialized;
-    size_t serialized_sz;
-    tuple_serialize_msg(&serialized, &serialized_sz, &m);
-    vecs[0].iov_base = serialized;
-    vecs[i].iov_len = serialized_sz;
 
     for (i = 0; i < min->msg_iovlen; i++) {
 	vecs[i + 1] = min->msg_iov[i];
 	totallen += min->msg_iov[i].iov_len;
     }
-
+    char* serialized;
+    size_t serialized_sz;
+    tuple_serialize_msg(&serialized, &serialized_sz, &m);
+    vecs[0].iov_base = serialized;
+    vecs[0].iov_len = serialized_sz;
     m.type = type;
     m.len = totallen;
     m.seq = sequenceNumber++;

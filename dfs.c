@@ -763,17 +763,17 @@ static void * dfs_init(struct fuse_conn_info *conn)
 
 	// grab current FS from server
 	Msg *reply = comm_send_and_reply_mutex(&replyLogserverMut, &replyLogserverCond, opLog.net_fd, DFS_MSG_GET_LOG, NULL);
+	char *log;
+	size_t log_sz;
+	assert(tuple_unserialize_log(&log, &log_sz, reply->data, reply->len) == 0);
 	if (reply) {
 	    if (reply->len) {
-		long	lastID = ((long *)(reply->data + reply->len))[-1];
-
-		dfs_out("received %d bytes (%ld records) from GET_LOG request\n", reply->len, lastID);
-
-		playLog(reply->data, reply->len);
-		opLog.served = opLog.used;
+		playLog(log, log_sz);
+		opLog.served = log_sz;
 	    }
 	    free(reply);
 	}
+	free(log);
     } else {
       dfs_die("NO setup client socket to log server at %d on '%s'\n", sport, sname);
     }

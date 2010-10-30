@@ -27,7 +27,15 @@ static void serverFlush(int force)
 {
     /* Assumes mutex is locked */
     // flush to disk
-    fwrite(opLog.data, opLog.used, 1, opLog.file_fd);
+  fseek(opLog.file_fd, 0, SEEK_SET);
+  {
+    char *serialized;
+    size_t serialized_sz;  
+    assert(tuple_serialize_log(&serialized, &serialized_sz, opLog.data, opLog.used) == 0);
+    fwrite(serialized, serialized_sz, 1, opLog.file_fd);
+    free(serialized);
+  }
+  fflush(opLog.file_fd);
 }
 
 
@@ -93,11 +101,15 @@ static void logInit(char *iname, char *oname, int sport)
     
 	assert(!opLog.data);
 	if (stat.st_size) {
-	    checkLogSpace(stat.st_size + BLOCK_SIZE /* make sure to alloc even if zero len log */);
-	    read(fd, opLog.data, stat.st_size);
+	    char *log;
+	    size_t log_sz;
+	    char *serialized = malloc(stat.st_size);
+	    read(fd, serialized, stat.st_size);
 	    close(fd);
-
-	    opLog.used = stat.st_size;
+	    assert(tuple_unserialize_log(&log, &log_sz, serialized, stat.st_size) == 0);
+	    free(serialized);
+	    opLog.data = log;
+	    opLog.alloced = opLog.used = log_sz;
 
 	    // rip through log to find last id used :-(
 	    {
