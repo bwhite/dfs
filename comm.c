@@ -23,6 +23,19 @@ pthread_cond_t			replyLogserverCond = PTHREAD_COND_INITIALIZER;
 int serialized_msg_hdr_len = -1; /* The comm libary needs to know the size of the serialized msg header
 				    as it is no longer the same size as Msg, we compute this once */
 
+static int whole_read(int sock, char *buf, long len)
+{
+  char*curr = buf, *bend = buf + len;
+
+  while ((bend - curr) > 0) {
+    int res = recv(sock, curr, bend - curr, 0);
+    if (res <= 0) return res;
+    curr += res;
+    dfs_out("Got %d (%d) of %d bytes on read\n", res, curr - buf, len);
+  };
+  return len;
+}
+
 void compute_serialized_msg_hdr_len() {
   if (serialized_msg_hdr_len != -1)
     return;
@@ -200,7 +213,7 @@ Msg *comm_read(int sock) {
     compute_serialized_msg_hdr_len();
     char *serialized = malloc(serialized_msg_hdr_len);
     //dfs_out("About to BLOCK on READ\n");
-    if (0 > (res = recv(sock, (char *)serialized, serialized_msg_hdr_len, 0)))
+    if (0 > (res = whole_read(sock, (char *)serialized, serialized_msg_hdr_len)))
 	dfs_die("recv error in read_msg\n");
     if (!res) {
 	dfs_out("SOCKET CLOSED AT OTHER END\n");
@@ -216,7 +229,7 @@ Msg *comm_read(int sock) {
     p = ((char *)m) + sizeof(Msg);
     pend = p + hdr.len;
     while (p < pend) {
-      if (0 > (res = recv(sock, p, hdr.len, 0)))
+      if (0 > (res = whole_read(sock, p, hdr.len)))
 	    dfs_die("readfrom error in SAGR");
 	dfs_out("read %d\n", res);
 	p += res;
