@@ -236,8 +236,6 @@ Extent	*get_extent(char *sig)
 // Like 'get_extent', but just return boolean 1 for found, or 0 for not.
 int	poll_extent(char *sig)
 {
-    Extent 	*ex;
-
     assert(sig);
     char *serialized;
     size_t serialized_sz;
