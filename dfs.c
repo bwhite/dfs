@@ -27,6 +27,7 @@
 #include <time.h>
 #include <sys/time.h>
 #include <assert.h>
+#define _GNU_SOURCE
 #include <search.h>
 
 #include <fuse.h>
@@ -218,7 +219,7 @@ Extent	*get_extent(char *sig)
     assert(ex);
 
     // verify sig
-    char *s = hash_bytes(unserialized, unserialized_sz);
+    char *s = cry_hash_bytes(unserialized, unserialized_sz);
     strcpy(ex->sig, s);
     free(s);
 
@@ -256,7 +257,7 @@ char *put_extent(char *buf, long sz)
 
     assert(buf && sz && (sz < (1024L * 1024L * 1024L)));
 
-    char *s = hash_bytes(buf, sz);
+    char *s = cry_hash_bytes(buf, sz);
 
     if (poll_extent(s)) {
 	printf("Server already has EXTENT\n");

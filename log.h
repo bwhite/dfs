@@ -1,4 +1,5 @@
-
+#ifndef LOG_H
+#define LOG_H
 // incr quantity to next double boundary if necessary
 
 typedef struct {
@@ -57,3 +58,4 @@ void 	logExtent(char *sig, int sz);
 void 	logOther(int type, const char *path, int flags, struct stat *stat);
 void	logRecreate(char *lname);
 void 	playLog(char *buf, int len);
+#endif

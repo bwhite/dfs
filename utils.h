@@ -12,12 +12,17 @@
 #include	<gcrypt.h>
 #include	<stdarg.h>
 #include	<pthread.h>
-
-
+#define HASH_SIZE 20
+#define A_HASH_SIZE (2 * HASH_SIZE + 1)
 
 void 			dfs_out(const char *s, ...);
 void 			dfs_die(const char *s, ...);
 void 			dfs_assert(int val, const char *fmt, ...);
+
+char 			*hash_to_ascii(char *md);	// dyn allocs space
+void 			ascii_to_hash(char *to, char *from);
+
+char 			*read_text_file(char *fname);
 
 //=============================================================================
 
@@ -32,9 +37,6 @@ void *wrapped_tdelete(const void *key, void **rootp,
 
 //=============================================================================
 
-#define	HASH_SIZE	20
-#define	A_HASH_SIZE	(2 * HASH_SIZE + 1)
-char			*hash_bytes (void *in, int in_len);
 
 
 #ifndef	MIN

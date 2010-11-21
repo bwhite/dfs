@@ -1,49 +1,68 @@
 
 CC = gcc
-CFLAGS = -D_FILE_OFFSET_BITS=64 -g -O0
+CFLAGS = -Wall -D_FILE_OFFSET_BITS=64 -g -O0 `libgcrypt-config --cflags`
 UNAME := $(shell uname)
+LIBS =   -lpthread -ltpl `libgcrypt-config --libs` -lexpat 
 
 ifeq ($(UNAME),Darwin)
-LIBS =  -lfuse_ino64 -L/opt/local/lib -lgcrypt -lpthread -ltpl
+LIBS +=  -lfuse_ino64 -L/opt/local/lib
 CFLAGS += -DDARWIN -I/opt/local/include
 endif
 
 ifeq ($(UNAME),Linux)
-LIBS =  -lfuse -lgcrypt -lpthread -ltpl
+LIBS +=  -lfuse
 CFLAGS += -DLINUX
 endif
 
-TARGETS = dfs extent printLog logServer tuple_test
+TARGETS = tag dfs extent printLog logServer test keys
 
-HEADERS =  dfs.h utils.h comm.h log.h tuple.h
+HEADERS =  dfs.h utils.h comm.h log.h tuple.h chits.h 
+
+UTILS = utils.o comm.o cry.o chits.o
 
 all: $(TARGETS)
 
 
-extent: extent.o comm.o utils.o comm.o tuple.o
+tag:
+	etags *.c *.h
+
+extent: extent.o comm.o utils.o comm.o tuple.o cry.o
 	$(CC) -o $@ $(CFLAGS) $^ $(LIBS)
 
 extent.o: extent.c $(HEADERS)
 
-logServer: logServer.o comm.o utils.o tuple.o
+logServer: logServer.o comm.o utils.o tuple.o cry.o xml.o chits.o
 	$(CC) -o $@ $(CFLAGS) $^ $(LIBS)
 
 logServer.o: logServer.c $(HEADERS)
 
-
-tuple_test: tuple_test.o tuple.o utils.o comm.o
+keys: keys.o utils.o tuple.o cry.o chits.o xml.o
 	$(CC) -o $@ $(CFLAGS) $^ $(LIBS)
 
-tuple_test.o: tuple_test.c $(HEADERS)
+keys.o: keys.c $(HEADERS)
 
-dfs: dfs.o utils.o comm.o log.o tuple.o
-	$(CC) -o $@ $(CFLAGS) $^ $(LIBS) `pkg-config --cflags --libs protobuf`
+dfs: dfs.o utils.o comm.o log.o tuple.o cry.o chits.o xml.o
+	$(CC) -o $@ $(CFLAGS) $^ $(LIBS)
 
 dfs.o: dfs.c $(HEADERS)
 
+chits.o: chits.c $(HEADERS)
+
+xml.o: xml.c $(HEADERS)
+
+test2: test2.o chits.o xml.o utils.o cry.o
+	gcc -g -o $@ $(CFLAGS) test2.o chits.o xml.o utils.o cry.o $(LIBS)
+
+test2.o: test2.c $(HEADERS)
+
+test: test.o chits.o xml.o utils.o cry.o
+	gcc -g -o $@ $(CFLAGS) test.o chits.o xml.o utils.o cry.o $(LIBS)
+
+test.o: test.c $(HEADERS)
+
 tuple.o: tuple.c $(HEADERS)
 
-printLog: printLog.o utils.o tuple.o
+printLog: printLog.o utils.o tuple.o cry.o
 	$(CC) -o $@ $(CFLAGS) $^ $(LIBS)
 
 printLog.o: printLog.c

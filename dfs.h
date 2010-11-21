@@ -1,7 +1,9 @@
-
+#ifndef DFS_H
+#define DFS_H
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <fuse.h>
+#include "utils.h"
 
 #ifndef S_IFDIR
 #  define S_IFDIR	__S_IFDIR
@@ -72,7 +74,7 @@ int 	dfs_unlink(const char *path);
 DfsFile *findFile(char *path);
 int 	dfs_chmod(const char *path, mode_t mode);
 
-
+#endif
 
 
 

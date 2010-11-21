@@ -13,6 +13,7 @@
 #include	<search.h>
 #include	<dirent.h>
 #include	"tuple.h"
+#include "cry.h"
 
 void 		ex_put_extent(char *buf, long sz);
 int 		ex_poll_extent(char *sig);
@@ -154,7 +155,7 @@ void ex_put_extent(char *buf, long sz)
 
     assert(buf && sz && ((long)sz < (1024L * 1024L * 1024L)));
 
-    sig = hash_bytes(buf, sz);
+    sig = cry_hash_bytes(buf, sz);
 
     if (ex_get_extent(sig))
 	return;
@@ -223,7 +224,7 @@ void read_extents()
 
 		    strcpy(ex->sig, ent->d_name);  
 		    
-		    char *s = hash_bytes(ex->data, ex->sz);
+		    char *s = cry_hash_bytes(ex->data, ex->sz);
 		    //assert(!strcmp(s, ex->sig));
 
 		    // insert that puppy. don't worry about dups because this is initialization
