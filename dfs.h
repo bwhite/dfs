@@ -58,10 +58,12 @@ extern DfsFile *	root;
 #define DFS_MSG_PUT_EXTENT	7
 #define DFS_MSG_GET_EXTENT	8
 #define DFS_MSG_POLL_EXTENT	9
+#define DFS_OHAI_SERVER	        10
+#define DFS_TAKE_CHIT_SERVER	11
 
 static char		*messages[] = {"", "MSG_REPLY", "DFS_MSG_PUSH_LOG", "DFS_MSG_GET_LOG", "DFS_MSG_INVAL", 
 				       "DFS_MSG_WANT_EXCL", "DFS_MSG_LOST_EXCL", "DFS_MSG_PUT_EXTENT", 
-				       "DFS_MSG_GET_EXTENT", "DFS_MSG_POLL_EXTENT" };
+				       "DFS_MSG_GET_EXTENT", "DFS_MSG_POLL_EXTENT", "DFS_OHAI_SERVER", "DFS_TAKE_CHIT_SERVER"};
 #define			NUM_MSG_TYPES (sizeof(messages) / sizeof(messages[0]))
 
 Extent	*get_extent(char *sig);			// should not be free'd afterwards

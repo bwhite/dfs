@@ -27,7 +27,6 @@
 #include <time.h>
 #include <sys/time.h>
 #include <assert.h>
-#define _GNU_SOURCE
 #include <search.h>
 
 #include <fuse.h>
@@ -69,6 +68,9 @@ char *sname = "localhost";
 char *xname = "localhost";
 int sport = LOG_PORT;
 int xport = EXTENT_PORT;
+
+// Auth vars
+char *chit = 0;
 
 //=============================================================================
     
@@ -756,12 +758,54 @@ static void * dfs_init(struct fuse_conn_info *conn)
 	dfs_die("NO setup client socket to extent server at %d on '%s'\n", xport, xname);
 
     if (sname && ((opLog.net_fd = comm_client_socket(sname, sport)) > 0)) {
+	// Here is where we auth
+        assert(chit);
+        // Send the server an OHAI
+	Msg *reply = comm_send_and_reply(opLog.net_fd, DFS_OHAI_SERVER, NULL);
+	char *reply_data = malloc(reply->len + 1);
+	memcpy(reply_data, reply->data, reply->len);
+	reply_data[reply->len] = '\0';
+	char server_nonce = reply_data[0];
+	char *server_pk = reply_data + 1;
+	printf("Server gave us a nonce [%d] and a pk[%s].  He liked our picture!\n", (int) server_nonce, server_pk);
+	// TODO Verify PK
+	// Make an AES session key
+	char session_key[16];
+	cry_create_nonce(16, session_key);
+	printf("Sym Key[%x%x%x%x]\n", *(session_key), *(session_key + 4), *(session_key + 8), *(session_key + 12));
+	// Encrypt session key with PK
+	char *session_key_encrypted;
+	int session_key_encrypted_sz;
+	cry_asym_encrypt(&session_key_encrypted, &session_key_encrypted_sz, session_key, 16, server_pk);
+	cry_sym_init(session_key);
+	int out_chit_len = strlen(chit) + 3;
+	char *out_chit = malloc(out_chit_len);
+	char client_nonce;
+	cry_create_nonce(1, &client_nonce);
+	printf("client nonce[%d]\n", (int)client_nonce);
+	out_chit[0] = client_nonce;
+	out_chit[1] = server_nonce;
+	strcpy(out_chit + 2, chit);
+	out_chit[out_chit_len - 1] = '\0';
+	char *out_chit_encrypted;
+	int out_chit_encrypted_sz;
+	cry_sym_encrypt(&out_chit_encrypted, &out_chit_encrypted_sz, out_chit, out_chit_len);
+	reply = comm_send_and_reply(opLog.net_fd, DFS_TAKE_CHIT_SERVER, session_key_encrypted,
+				    session_key_encrypted_sz, out_chit_encrypted, out_chit_encrypted_sz, NULL);
+	char *out_nonce;
+	int out_nonce_sz;
+	cry_sym_decrypt(&out_nonce, &out_nonce_sz, reply->data, reply->len);
+	printf("Nonce check[%d][%d]\n", (int)client_nonce, (int)(*out_nonce));
+	assert(*out_nonce == (char)(client_nonce + 1));
+	assert(0);
+	free(reply);
+
 	// create a new thread reading this socket
 	pthread_t		tid;
 	pthread_create(&tid, NULL, listener, &opLog.net_fd);
 
 	// grab current FS from server
-	Msg *reply = comm_send_and_reply_mutex(&replyLogserverMut, &replyLogserverCond, opLog.net_fd, DFS_MSG_GET_LOG, NULL);
+	reply = comm_send_and_reply_mutex(&replyLogserverMut, &replyLogserverCond, opLog.net_fd, DFS_MSG_GET_LOG, NULL);
 	char *log;
 	size_t log_sz;
 	assert(tuple_unserialize_log(&log, &log_sz, reply->data, reply->len) == 0);
@@ -800,7 +844,7 @@ static struct fuse_operations dfs_oper = {
 int main(int argc, char *argv[])
 {
     int			i, arg = 0, c;
-    while ((c = getopt(argc, argv, "i:o:s:S:x:X:")) != -1) {
+    while ((c = getopt(argc, argv, "i:o:s:S:x:X:c:")) != -1) {
 	switch (c) {
 	case 's':
 	    sname = optarg;
@@ -813,6 +857,21 @@ int main(int argc, char *argv[])
 	case 'x':
 	    xname = optarg;
 	    arg += 2;
+	    break;
+	case 'c':
+	  {
+	    FILE *chit_fp;
+	    chit_fp = fopen(optarg, "r");
+	    assert(chit_fp);
+	    fseek(chit_fp, 0, SEEK_END);
+	    int chit_sz = ftell(chit_fp);
+	    fseek(chit_fp, 0, SEEK_SET);
+	    chit = malloc(chit_sz + 1);
+	    fread(chit, chit_sz, 1, chit_fp);
+	    chit[chit_sz] = '\0';
+	    printf("Read chit[%s]\n", chit);
+  	    arg += 2;
+	  }
 	    break;
 	case 'X':
 	    xport = atoi(optarg);

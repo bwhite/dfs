@@ -9,7 +9,9 @@
 Log				opLog;
 static pthread_mutex_t		serverMut = PTHREAD_MUTEX_INITIALIZER;
 Client *my_clients;
-int push_updates = 1;
+char my_serverprint[] = "FABBD729BCD7AAD7F557B494746E814136FD1A6A";
+char my_public_key[] = "(public-key (rsa (n #00A8642A89E77DCE76E04140CA45712493262E01CBA412E6F9CF16AA16F31BF0F6EA79244EA9D99978060217312473F6CC946E1F49FACB6D8542EA7581122B3E4C5DB4985963219773CD09362FBA67525C10E0BDA01A0490D41020CA3C80E346E3C5DCCDCB8A9A2C613243807C25DB672093DFC14D3E808632480057403B4EEDDB#) (e #010001#)))";
+char my_private_key[] = "(private-key (rsa (n #00A8642A89E77DCE76E04140CA45712493262E01CBA412E6F9CF16AA16F31BF0F6EA79244EA9D99978060217312473F6CC946E1F49FACB6D8542EA7581122B3E4C5DB4985963219773CD09362FBA67525C10E0BDA01A0490D41020CA3C80E346E3C5DCCDCB8A9A2C613243807C25DB672093DFC14D3E808632480057403B4EEDDB#)(e #010001#)(d #08647DA3993B06F2F12304C4A55E09E6F4EC8415B9DC0B5100B0EE274354982CE640C568CF99A87177F330B9629F63A48C9D49C7EE77A7176634B89DDC8C4A882A76C905038CD6A34B76A6F753F18822391BA9EB26CECC147ECB86E005D50F3B37825DBA5672D7E74247FA499E826F7B802DB87D14938EEB0685311E27983351#)(p #00CB74A0305B60EE9C801610F721A530229C1211FA591968A9DD74C12604ED261289D34F1CA9A332DC8A4267BAAD97DD139C4C66576E803BB4AD1AE2A061B0AF49#)(q #00D3E147BA1C531A294CA3F3DF4EE333B8AAA8F84972E9BA92BBFBDFA2EDFDB9C21A2F7D02197C3CC8479C358D1425E9FCB10BEC348F57FAF8E849B9DADCF5E003#)(u #7ACE3777A3C5DE550657BC19F4B462C4803DE86AA1878C895CFDB4E2F5780DDF7316EC424727FBF07892C4B9020E3D4FC76D6A88EB369A4765AC5EB6FBBDF448#)))";
 
 //=============================================================================
 
@@ -136,73 +138,6 @@ static void logInit(char *iname, char *oname, int sport)
 
     atexit(exit_proc);
 }
-    
-
-/*
-static void receiveLog(Client *c, Msg *m)
-{
-}
-*/
-
-int check_collision(int type, char *m_data, char **start, char **stop) {
-    char *data = opLog.data;
-    char *end = opLog.data + opLog.used;
-    char *path;
-    int version;
-    if (type == LOG_FILE_VERSION) {
-	LogFileVersion *fv = (LogFileVersion*)(m_data);
-	path = ((char *)(fv + 1)) + fv->recipelen;
-	version = fv->hdr.id;
-    } else {
-	LogOther *fv = (LogOther*)(m_data);
-	path = ((char *)(fv + 1));
-	version = fv->hdr.id;
-    }
-    while (data < end) {
-	char *cur_path;
-	int cur_version;
-	switch ( ((LogHdr *)data)->type ) {
-	case LOG_FILE_VERSION:
-	    {
-		LogFileVersion	*fv = (LogFileVersion *)data;
-		char		*recipes = (char *)(fv + 1);
-		cur_version = fv->hdr.id;
-		cur_path = recipes + fv->recipelen;
-	    }
-	    break;
-	case LOG_UNLINK:
-	case LOG_CHMOD:
-	case LOG_MKDIR:
-	    {
-		LogOther *fv = (LogOther *)data;
-		cur_path = (char *)(fv + 1);
-		cur_version = fv->hdr.id;
-	    }
-	    break;
-	case LOG_RMDIR:
-	    {
-		LogOther *fv = (LogOther *)data;
-		cur_path = (char *)(fv + 1);
-		cur_version = fv->hdr.id;
-		// Second condition: If this removes any subpath
-	    }
-	    break;
-	default:
-	    printf("BAD RECORD\n");
-	    exit(1);
-	}
-	//dfs_out("Checking path [%s][%d][%d]\n", path, version, ((LogHdr *)data)->len);
-	// First condition: If we are modifying any path along the way
-	if (cur_version >= version && !strcmp(path, cur_path)) {
-	    *start = data;
-	    *stop = end;
-	    return 1;
-	}
-	// Third condition: If the command is a rmdir, check to see if it remove any cur_subpath
-	data += ((LogHdr *)data)->len;
-    }
-    return 0;
-}
 
 static void *listen_proc(void *arg) 
 {
@@ -227,14 +162,63 @@ static void *listen_proc(void *arg)
     dfs_out("\n\tLISTEN PROC IN, sock %d! (id %d, tid %d)\n\n", c->fd, c->id, c->tid);
 
     pthread_detach(pthread_self());
-
+    // Start auth vars
+    int auth_state = 0; // -1: Client is authed 0: Didn't say Hai yet 1: Said Hai
+    char server_nonce;
+    // Stop auth vars
     Msg *m;
     while (m = comm_read(c->fd)) {
 	Extent		*ex;
 	char		*sig, *data;
 	switch (m->type) {
+	case DFS_OHAI_SERVER:
+	  {
+	    assert(auth_state == 0);
+	    auth_state++;
+	    /* 0: Make a nonce (1 char), send PK and nonce */
+	    cry_create_nonce(1, &server_nonce);
+	    printf("Server nonce[%d]\n", (int)server_nonce);
+	    char out_nonce = server_nonce;
+	    printf("Client said [O Hai!] along with this picture http://is.gd/hyjIm\n");
+	    printf("Lets give him a nonce[%d] and pk[%s]\n", (int)out_nonce, my_public_key);
+	    comm_reply(c->fd, m, REPLY_OK, &out_nonce, 1, my_public_key, strlen(my_public_key), NULL);
+	  }
+	  break;
+	case DFS_TAKE_CHIT_SERVER:
+	  {
+	    assert(auth_state == 1);
+	    auth_state++;
+	    /* 1: */
+	    char *encrypted_sym = m->data;
+	    int encrypted_chit_bundle_sz = m->len - (strlen(encrypted_sym) + 1);
+	    char *encrypted_chit_bundle = m->data + strlen(encrypted_sym) + 1;
+	    // Decrypt sym
+	    char *sym;
+	    int sym_sz;
+	    cry_asym_decrypt(&sym, &sym_sz, encrypted_sym, strlen(encrypted_sym), my_private_key);
+	    char *chit_bundle;
+	    int chit_bundle_sz;
+	    printf("Sym Key[%x%x%x%x]\n", (sym), (sym + 4), (sym + 8), (sym + 12));
+	    cry_sym_init(sym); // TODO May need to lock here for multiple clients
+	    cry_sym_decrypt(&chit_bundle, &chit_bundle_sz, encrypted_chit_bundle, encrypted_chit_bundle_sz);
+	    char c_client_nonce = chit_bundle[0];
+	    char c_server_nonce = chit_bundle[1];
+	    char *c_chit = chit_bundle + 2;
+	    // TODO Verify chit
+	    printf("Nonce check[%d][%d]\n", (int)c_server_nonce, (int)server_nonce);
+	    //assert(c_server_nonce == server_nonce); // TODO just reply error
+	    printf("client[%d] server[%d] Chit![%s]\n", (int)c_client_nonce, (int)c_server_nonce, c_chit);
+	    char out_nonce = c_client_nonce + 1;
+	    printf("Incremented client[%d][%d]", (int)c_client_nonce, (int)out_nonce);
+	    char *out_nonce_encrypted;
+	    int out_nonce_encrypted_sz;
+	    cry_sym_encrypt(&out_nonce_encrypted, &out_nonce_encrypted_sz, &out_nonce, 1);
+	    comm_reply(c->fd, m, REPLY_OK, out_nonce_encrypted, out_nonce_encrypted_sz, NULL);
+	  }
+	  break;
 	case DFS_MSG_GET_LOG:
 	    {
+	      assert(auth_state == -1);
 		dfs_out("Get wants lock\n");
 		pthread_mutex_lock(&serverMut);
 		dfs_out("Get locked\n");
@@ -251,7 +235,7 @@ static void *listen_proc(void *arg)
 	    }
 	case DFS_MSG_PUSH_LOG:
 	    {
-
+	      assert(auth_state == -1);
 	      char *log;
 	      size_t log_sz;
 	      assert(tuple_unserialize_log(&log, &log_sz, m->data, m->len) == 0);
@@ -260,33 +244,24 @@ static void *listen_proc(void *arg)
 	      dfs_out("Push wants lock\n");
 	      pthread_mutex_lock(&serverMut);
 	      dfs_out("Push locked\n");
-	      char *start, *stop;	      
-	      dfs_out("Col Check\n");
-	      if (check_collision(m->type, log, &start, &stop)) {
-		dfs_out("***Collision***\n");
-		comm_reply(c->fd, m, REPLY_ERR, start, stop - start, NULL);
-	      } else {
-		comm_reply(c->fd, m, REPLY_OK, NULL);
-		// Append to log
-		((LogHdr *)log)->id = ++opLog.id; // Forces all commits to be sequential
-		dfs_out("Record gets id[%d]\n", opLog.id);
-		checkLogSpace(log_sz);
-		memcpy(opLog.data + opLog.used, log, log_sz);
-		opLog.used = opLog.used + log_sz;
-		if (push_updates){
-		  // flush to other clients
-		  dfs_out("Outside while\n");
-		  Client *cur_c = my_clients;
-		  while(cur_c != NULL) {
-		    dfs_out("Sending again[%p]...\n", cur_c);
-		    // Send serialized version
-		    comm_send(cur_c->fd, DFS_MSG_PUSH_LOG, m->data, m->len, NULL);
-		    cur_c = cur_c->next;
-		  }
-		}
-		dfs_out("Done sending... Flushing server\n");
-		serverFlush(1);
+	      char *start, *stop;
+	      comm_reply(c->fd, m, REPLY_OK, NULL);
+	      // Append to log
+	      ((LogHdr *)log)->id = ++opLog.id; // Forces all commits to be sequential
+	      dfs_out("Record gets id[%d]\n", opLog.id);
+	      checkLogSpace(log_sz);
+	      memcpy(opLog.data + opLog.used, log, log_sz);
+	      opLog.used = opLog.used + log_sz;
+	      // flush to other clients
+	      Client *cur_c = my_clients;
+	      while(cur_c != NULL) {
+		dfs_out("Sending again[%p]...\n", cur_c);
+		// Send serialized version
+		comm_send(cur_c->fd, DFS_MSG_PUSH_LOG, m->data, m->len, NULL);
+		cur_c = cur_c->next;
 	      }
+	      dfs_out("Done sending... Flushing server\n");
+	      serverFlush(1);
 	      pthread_mutex_unlock(&serverMut);
 	      dfs_out("Push Unlocked\n");
 	      free(log);
@@ -312,9 +287,6 @@ int main(int argc, char *argv[])
 
     while ((c = getopt(argc, argv, "i:o:p:c")) != -1) {
 	switch (c) {
-	case 'c':
-	    push_updates = 0;
-	    break;
 	case 'i':
 	    iname = optarg;
 	    break;
