@@ -35,6 +35,7 @@
 #include "dfs.h"
 #include "comm.h"
 #include "log.h"
+#include "chits.h"
 
 
 //=============================================================================
@@ -68,9 +69,11 @@ char *sname = "localhost";
 char *xname = "localhost";
 int sport = LOG_PORT;
 int xport = EXTENT_PORT;
+char *narrowing = NULL;
 
 // Auth vars
 char *chit = 0;
+chit_t *chit_struct = NULL;
 
 //=============================================================================
     
@@ -128,6 +131,12 @@ static int file_compare(const void *node1, const void *node2) {
 
 //=============================================================================
 
+
+char *narrow_path(char *path) {
+  char *out_path = malloc(strlen(path) + strlen(narrowing) + 1);
+  strcpy(out_path, narrowing);
+  return strcat(out_path, path);
+}
 
 
 DfsFile *mkNode(const char *path, const char *name, DfsFile *parent, mode_t mode) {
@@ -869,7 +878,19 @@ int main(int argc, char *argv[])
 	    chit = malloc(chit_sz + 1);
 	    fread(chit, chit_sz, 1, chit_fp);
 	    chit[chit_sz] = '\0';
+	    chit_struct = xcred_parse(strdup(chit));
+	    attr_t *attr = chit_struct->attrs;
+	    while (attr) {
+	      if (attr->tag == TAG_NARROW) {
+		// TODO: We may want to verify that the narrowings narrow
+		free(narrowing);
+		narrowing = strdup(attr->val_s);
+		printf("Attr: tag[%d] val_s[%s]\n", attr->tag, attr->val_s);
+	      }
+	      attr = attr->next;
+	    }
 	    printf("Read chit[%s]\n", chit);
+	    printf("Narrowing[%s]\n", narrowing);
   	    arg += 2;
 	  }
 	    break;
