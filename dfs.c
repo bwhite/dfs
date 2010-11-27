@@ -299,8 +299,9 @@ DfsFile *findFile(char *path)
 
 static int dfs_getattr(const char *path, struct stat *stbuf)
 {
+    path = narrow_path(path);
     DfsFile	*f = findFile((char *)path);
-
+    
     dfs_out("GETATTR: '%s' (%ld)\n", path, f);
     if (!f) return -ENOENT;
 
@@ -313,6 +314,7 @@ static int dfs_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
                          off_t offset, struct fuse_file_info *fi)
 {
     pthread_mutex_lock(&treeMut);
+    path = narrow_path(path);
     DfsFile	*f = findFile((char *)path);
     int		i;
 
@@ -336,6 +338,7 @@ static int dfs_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
 static int _dfs_open(const char *path, struct fuse_file_info *fi)
 {
     DfsFile	*f;
+    path = narrow_path(path);
     dfs_out("\n\tFUSE OPEN '%s'\n\n", path);
 
     if (!(f = findFile((char *)path))) {
@@ -384,6 +387,7 @@ static int _dfs_open(const char *path, struct fuse_file_info *fi)
 static int dfs_open(const char *path, struct fuse_file_info *fi) {
     int out;
     pthread_mutex_lock(&treeMut);
+    path = narrow_path(path);
     out = _dfs_open(path, fi);
     pthread_mutex_unlock(&treeMut);
     return out;
@@ -395,6 +399,7 @@ static int dfs_read(const char *path, char *buf, size_t size, off_t offset,
 {
     size_t len;
     pthread_mutex_lock(&treeMut);
+    path = narrow_path(path);
     dfs_out("READ: '%s', sz %d, offset %d\n", path, size, offset);
 
     DfsFile	*f = findFile((char *)path);
@@ -433,6 +438,7 @@ static int dfs_write(const char *path, const char *buf, size_t size, off_t offse
 {
     size_t len;
     pthread_mutex_lock(&treeMut);
+    path = narrow_path(path);
     dfs_out("WRITE: '%s', sz %d, offset %d\n", path, size, offset);
 
     DfsFile	*f = findFile((char *)path);
@@ -471,6 +477,7 @@ static int dfs_write(const char *path, const char *buf, size_t size, off_t offse
 int dfs_create(const char *path, mode_t mode, struct fuse_file_info *fi)
 {
     pthread_mutex_lock(&treeMut);
+    path = narrow_path(path);
     dfs_out("CREATE: '%s'\n", path);
 
     DfsFile	*f = findFile((char *)path);
@@ -515,7 +522,6 @@ int _dfs_chmod(const char *path, mode_t mode)
 {
     /* Assumes treeMut is locked */
     DfsFile	*f;
-
     dfs_out("CHMOD: '%s' %o\n", path, mode);
 
     if (!(f = findFile((char *)path)))
@@ -531,6 +537,7 @@ int dfs_chmod(const char *path, mode_t mode) {
     int out;
     DfsFile *f;
     pthread_mutex_lock(&treeMut);
+    path = narrow_path(path);
     out = _dfs_chmod(path, mode);
     if (out) {
 	pthread_mutex_unlock(&treeMut);
@@ -593,6 +600,7 @@ int _dfs_mkdir(const char *path, mode_t mode)
 int dfs_mkdir(const char *path, mode_t mode) {
     int out;
     pthread_mutex_lock(&treeMut);
+    path = narrow_path(path);
     out = _dfs_mkdir(path, mode);
     if (out) {
 	pthread_mutex_unlock(&treeMut);
@@ -625,6 +633,7 @@ int _dfs_rmdir(const char *path)
 int dfs_rmdir(const char *path) {
     int out;
     pthread_mutex_lock(&treeMut);
+    path = narrow_path(path);
     out = _dfs_rmdir(path);
     if (out) {
 	pthread_mutex_unlock(&treeMut);
@@ -638,6 +647,7 @@ int dfs_rmdir(const char *path) {
 int _dfs_unlink(const char *path)
 {
     /* Assumes treeMut is locked */
+    path = narrow_path(path);
     DfsFile	*f;
 
     dfs_out("Unlink '%s'\n", path);
@@ -806,7 +816,6 @@ static void * dfs_init(struct fuse_conn_info *conn)
 	cry_sym_decrypt(&out_nonce, &out_nonce_sz, reply->data, reply->len);
 	printf("Nonce check[%d][%d]\n", (int)client_nonce, (int)(*out_nonce));
 	assert(*out_nonce == (char)(client_nonce + 1));
-	assert(0);
 	free(reply);
 
 	// create a new thread reading this socket
