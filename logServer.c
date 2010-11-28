@@ -214,6 +214,7 @@ static void *listen_proc(void *arg)
 	    int out_nonce_encrypted_sz;
 	    cry_sym_encrypt(&out_nonce_encrypted, &out_nonce_encrypted_sz, &out_nonce, 1);
 	    comm_reply(c->fd, m, REPLY_OK, out_nonce_encrypted, out_nonce_encrypted_sz, NULL);
+	    auth_state = -1;
 	  }
 	  break;
 	case DFS_MSG_GET_LOG:

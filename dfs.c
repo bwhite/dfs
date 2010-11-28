@@ -134,8 +134,15 @@ static int file_compare(const void *node1, const void *node2) {
 
 char *narrow_path(char *path) {
   char *out_path = malloc(strlen(path) + strlen(narrowing) + 1);
+  printf("narrow in[%s]\n", path);
   strcpy(out_path, narrowing);
-  return strcat(out_path, path);
+  strcat(out_path, path);
+  if (strlen(out_path) > 1 && out_path[strlen(out_path) - 1] == '/') {
+      printf("Removing ending\n");
+      out_path[strlen(out_path) - 1] = '\0';
+  }
+  printf("narrow out[%s]\n", out_path);
+  return out_path;
 }
 
 
@@ -338,7 +345,6 @@ static int dfs_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
 static int _dfs_open(const char *path, struct fuse_file_info *fi)
 {
     DfsFile	*f;
-    path = narrow_path(path);
     dfs_out("\n\tFUSE OPEN '%s'\n\n", path);
 
     if (!(f = findFile((char *)path))) {
@@ -685,6 +691,7 @@ static int dfs_flush(const char *path, struct fuse_file_info *fi)
 {
     DfsFile	*f;
     pthread_mutex_lock(&treeMut);
+    path = narrow_path(path);
     dfs_out("DFS_FLUSH '%s\n", path);
 
     if (!(f = findFile((char *)path))) {
@@ -889,6 +896,8 @@ int main(int argc, char *argv[])
 	    chit[chit_sz] = '\0';
 	    chit_struct = xcred_parse(strdup(chit));
 	    attr_t *attr = chit_struct->attrs;
+	    narrowing = malloc(1);
+	    *narrowing = '\0';
 	    while (attr) {
 	      if (attr->tag == TAG_NARROW) {
 		// TODO: We may want to verify that the narrowings narrow
