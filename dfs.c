@@ -70,6 +70,10 @@ char *xname = "localhost";
 int sport = LOG_PORT;
 int xport = EXTENT_PORT;
 char *narrowing = NULL;
+int remove_write = 0;
+int remove_delete = 0;
+int remove_create = 0;
+
 
 // Auth vars
 char *chit = 0;
@@ -446,6 +450,10 @@ static int dfs_write(const char *path, const char *buf, size_t size, off_t offse
     pthread_mutex_lock(&treeMut);
     path = narrow_path(path);
     dfs_out("WRITE: '%s', sz %d, offset %d\n", path, size, offset);
+    if (remove_write) {
+	pthread_mutex_unlock(&treeMut);
+	return -EACCES;
+    }
 
     DfsFile	*f = findFile((char *)path);
 
@@ -484,6 +492,10 @@ int dfs_create(const char *path, mode_t mode, struct fuse_file_info *fi)
 {
     pthread_mutex_lock(&treeMut);
     path = narrow_path(path);
+    if (remove_create) {
+	pthread_mutex_unlock(&treeMut);
+	return -EACCES;
+    }
     dfs_out("CREATE: '%s'\n", path);
 
     DfsFile	*f = findFile((char *)path);
@@ -607,6 +619,10 @@ int dfs_mkdir(const char *path, mode_t mode) {
     int out;
     pthread_mutex_lock(&treeMut);
     path = narrow_path(path);
+    if (remove_create) {
+	pthread_mutex_unlock(&treeMut);
+	return -EACCES;
+    }
     out = _dfs_mkdir(path, mode);
     if (out) {
 	pthread_mutex_unlock(&treeMut);
@@ -640,6 +656,10 @@ int dfs_rmdir(const char *path) {
     int out;
     pthread_mutex_lock(&treeMut);
     path = narrow_path(path);
+    if (remove_delete) {
+	pthread_mutex_unlock(&treeMut);
+	return -EACCES;
+    }
     out = _dfs_rmdir(path);
     if (out) {
 	pthread_mutex_unlock(&treeMut);
@@ -675,6 +695,10 @@ int dfs_unlink(const char *path) {
     int out;
     pthread_mutex_lock(&treeMut);
     out = _dfs_unlink(path);
+    if (remove_delete) {
+	pthread_mutex_unlock(&treeMut);
+	return -EACCES;
+    }
     if (out) {
 	pthread_mutex_unlock(&treeMut);
 	return out;
@@ -756,7 +780,11 @@ static int dfs_truncate(const char *path, off_t sz)
     DfsFile	*f;
     pthread_mutex_lock(&treeMut);
     dfs_out("\n\tFUSE TRUNCATE\n\n");
-
+    path = narrow_path(path);
+    if (remove_write) {
+	pthread_mutex_unlock(&treeMut);
+	return -EACCES;
+    }
     if (!(f = findFile((char *)path))) {
 	pthread_mutex_unlock(&treeMut);
 	return -ENOENT;
@@ -903,7 +931,15 @@ int main(int argc, char *argv[])
 		// TODO: We may want to verify that the narrowings narrow
 		free(narrowing);
 		narrowing = strdup(attr->val_s);
-		printf("Attr: tag[%d] val_s[%s]\n", attr->tag, attr->val_s);
+	      } else if (attr->tag == TAG_REMOVE_RIGHT) {
+		  printf("Remove[%d]\n", attr->val_l);
+		  if (attr->val_l == RIGHT_CREATE) {
+		      remove_create = 1;
+		  } else if (attr->val_l == RIGHT_WRITE) {
+		      remove_write = 1;
+		  } else if (attr->val_l == RIGHT_DELETE) {
+		      remove_delete = 1;
+		  }
 	      }
 	      attr = attr->next;
 	    }
