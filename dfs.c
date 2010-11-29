@@ -73,7 +73,8 @@ char *narrowing = NULL;
 int remove_write = 0;
 int remove_delete = 0;
 int remove_create = 0;
-
+extern int encryption;
+extern char session_key[16];
 
 // Auth vars
 char *chit = 0;
@@ -88,7 +89,7 @@ static void *listener(void *arg)
     dfs_out("\n\tLISTEN PROC IN, sock %d!\n\n", fd);
     
     Msg *m;
-    while (m = comm_read(fd)) {
+    while (m = comm_read(1, fd)) {
 
 	switch (m->type) {
 	case DFS_MSG_PUSH_LOG:
@@ -229,7 +230,7 @@ Extent	*get_extent(char *sig)
     char *serialized;
     size_t serialized_sz;
     assert(tuple_serialize_sig(&serialized, &serialized_sz, sig) == 0);
-    Msg	*reply = comm_send_and_reply(extentSock, DFS_MSG_GET_EXTENT, serialized, serialized_sz, NULL);
+    Msg	*reply = comm_send_and_reply(0, extentSock, DFS_MSG_GET_EXTENT, serialized, serialized_sz, NULL);
     free(serialized);
     if (!reply || (reply->res != REPLY_OK)) 
 	return NULL;
@@ -262,7 +263,7 @@ int	poll_extent(char *sig)
     char *serialized;
     size_t serialized_sz;
     assert(tuple_serialize_sig(&serialized, &serialized_sz, sig) == 0);
-    Msg	*reply = comm_send_and_reply(extentSock, DFS_MSG_POLL_EXTENT, serialized, serialized_sz, NULL);
+    Msg	*reply = comm_send_and_reply(0, extentSock, DFS_MSG_POLL_EXTENT, serialized, serialized_sz, NULL);
     int ret =  (reply && (reply->res == REPLY_OK));
     free(reply);
     free(serialized);
@@ -286,7 +287,7 @@ char *put_extent(char *buf, long sz)
     char *serialized;
     size_t serialized_sz;
     assert(tuple_serialize_sig_extent(s, &serialized, &serialized_sz, buf, sz) == 0);
-    Msg	*reply = comm_send_and_reply(extentSock, DFS_MSG_PUT_EXTENT, serialized, serialized_sz, NULL);
+    Msg	*reply = comm_send_and_reply(0, extentSock, DFS_MSG_PUT_EXTENT, serialized, serialized_sz, NULL);
     free(serialized);
     if (!reply) dfs_die("No get reply\n");
 
@@ -815,7 +816,7 @@ static void * dfs_init(struct fuse_conn_info *conn)
 	// Here is where we auth
         assert(chit);
         // Send the server an OHAI
-	Msg *reply = comm_send_and_reply(opLog.net_fd, DFS_OHAI_SERVER, NULL);
+	Msg *reply = comm_send_and_reply(0, opLog.net_fd, DFS_OHAI_SERVER, NULL);
 	char *reply_data = malloc(reply->len + 1);
 	memcpy(reply_data, reply->data, reply->len);
 	reply_data[reply->len] = '\0';
@@ -824,7 +825,6 @@ static void * dfs_init(struct fuse_conn_info *conn)
 	printf("Server gave us a nonce [%d] and a pk[%s].  He liked our picture!\n", (int) server_nonce, server_pk);
 	// TODO Verify PK
 	// Make an AES session key
-	char session_key[16];
 	cry_create_nonce(16, session_key);
 	printf("Sym Key[%x%x%x%x]\n", *(session_key), *(session_key + 4), *(session_key + 8), *(session_key + 12));
 	// Encrypt session key with PK
@@ -844,10 +844,11 @@ static void * dfs_init(struct fuse_conn_info *conn)
 	char *out_chit_encrypted;
 	int out_chit_encrypted_sz;
 	cry_sym_encrypt(&out_chit_encrypted, &out_chit_encrypted_sz, out_chit, out_chit_len);
-	reply = comm_send_and_reply(opLog.net_fd, DFS_TAKE_CHIT_SERVER, session_key_encrypted,
+	reply = comm_send_and_reply(0, opLog.net_fd, DFS_TAKE_CHIT_SERVER, session_key_encrypted,
 				    session_key_encrypted_sz, out_chit_encrypted, out_chit_encrypted_sz, NULL);
 	char *out_nonce;
 	int out_nonce_sz;
+	cry_sym_init(session_key);
 	cry_sym_decrypt(&out_nonce, &out_nonce_sz, reply->data, reply->len);
 	printf("Nonce check[%d][%d]\n", (int)client_nonce, (int)(*out_nonce));
 	assert(*out_nonce == (char)(client_nonce + 1));
@@ -858,7 +859,7 @@ static void * dfs_init(struct fuse_conn_info *conn)
 	pthread_create(&tid, NULL, listener, &opLog.net_fd);
 
 	// grab current FS from server
-	reply = comm_send_and_reply_mutex(&replyLogserverMut, &replyLogserverCond, opLog.net_fd, DFS_MSG_GET_LOG, NULL);
+	reply = comm_send_and_reply_mutex(1, &replyLogserverMut, &replyLogserverCond, opLog.net_fd, DFS_MSG_GET_LOG, NULL);
 	char *log;
 	size_t log_sz;
 	assert(tuple_unserialize_log(&log, &log_sz, reply->data, reply->len) == 0);
@@ -897,7 +898,7 @@ static struct fuse_operations dfs_oper = {
 int main(int argc, char *argv[])
 {
     int			i, arg = 0, c;
-    while ((c = getopt(argc, argv, "i:o:s:S:x:X:c:")) != -1) {
+    while ((c = getopt(argc, argv, "ei:o:s:S:x:X:c:")) != -1) {
 	switch (c) {
 	case 's':
 	    sname = optarg;
@@ -906,6 +907,10 @@ int main(int argc, char *argv[])
 	case 'S':
 	    sport = atoi(optarg);
 	    arg += 2;
+	    break;
+	case 'e':
+	    encryption = 1;
+	    arg++;
 	    break;
 	case 'x':
 	    xname = optarg;

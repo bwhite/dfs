@@ -20,9 +20,10 @@ static CommStats	*commStats;
 static pthread_mutex_t	statsMut = PTHREAD_MUTEX_INITIALIZER;
 pthread_mutex_t			replyLogserverMut = PTHREAD_MUTEX_INITIALIZER;
 pthread_cond_t			replyLogserverCond = PTHREAD_COND_INITIALIZER;
-int serialized_msg_hdr_len = -1; /* The comm libary needs to know the size of the serialized msg header
-				    as it is no longer the same size as Msg, we compute this once */
-
+//int serialized_msg_hdr_len = -1; /* The comm libary needs to know the size of the serialized msg header
+//				    as it is no longer the same size as Msg, we compute this once */
+int encryption = 0;
+char session_key[16];
 static int whole_read(int sock, char *buf, long len)
 {
   char*curr = buf, *bend = buf + len;
@@ -36,19 +37,28 @@ static int whole_read(int sock, char *buf, long len)
   return len;
 }
 
-void compute_serialized_msg_hdr_len() {
-  if (serialized_msg_hdr_len != -1)
-    return;
+int compute_serialized_msg_hdr_len(int igenc) {
   Msg in_msg;
   char *serialized;
-  size_t serialized_sz;  
+  size_t serialized_sz;
+  int serialized_msg_hdr_len;
   in_msg.seq = 0;
   in_msg.type = 0;
   in_msg.res = 0;
   in_msg.len = 0;
   assert(!tuple_serialize_msg(&serialized, &serialized_sz, &in_msg));
+  if (encryption && igenc) {
+      char *dummy;
+      dfs_out("Checking header len\n");
+      cry_sym_init(session_key);
+      cry_sym_encrypt(&dummy, &serialized_msg_hdr_len, serialized, serialized_sz);
+      free(dummy);
+  } else {
+      serialized_msg_hdr_len = serialized_sz;
+  }
   free(serialized);
-  serialized_msg_hdr_len = serialized_sz;
+  dfs_out("Serialized msg size[%d]\n", serialized_msg_hdr_len);
+  return serialized_msg_hdr_len;
 }
 
 
@@ -206,11 +216,12 @@ int comm_client_socket(char *hostname, int port)
 //=============================================================================
 
     
-Msg *comm_read(int sock) {
+Msg *comm_read(int igenc, int sock) {
     Msg		hdr, *m;
     int		res;
     char	*p, *pend;
-    compute_serialized_msg_hdr_len();
+    dfs_out("Top of comm_read\n");
+    int serialized_msg_hdr_len = compute_serialized_msg_hdr_len(igenc);
     char *serialized = malloc(serialized_msg_hdr_len);
     //dfs_out("About to BLOCK on READ\n");
     if (0 > (res = whole_read(sock, (char *)serialized, serialized_msg_hdr_len)))
@@ -220,9 +231,22 @@ Msg *comm_read(int sock) {
 	close(sock);
 	return NULL;
     }
-    tuple_unserialize_msg(serialized, serialized_msg_hdr_len, &hdr);
+    dfs_out("Before enc0, msg header len[%d]\n", serialized_msg_hdr_len);
+    int out_sz = serialized_msg_hdr_len;
+    if (encryption && igenc) {
+	dfs_out("Decrypting header\n");
+        dfs_out("Read enc0\n");
+	char *out;
+	cry_sym_init(session_key);
+	cry_sym_decrypt(&out, &out_sz, serialized, serialized_msg_hdr_len);
+	free(serialized);
+	serialized = out;
+    }
+    dfs_out("tplhdr[%s]\n", serialized);
+    tuple_unserialize_msg(serialized, out_sz, &hdr);
     free(serialized);
     dfs_out("PEEK %d\n", hdr.len);
+    // TODO Here we need to decrypt, as the message header length will be wrong
     m = (Msg *)malloc(sizeof(Msg) + hdr.len);
     assert(m);
     memcpy(m, &hdr, sizeof(Msg));
@@ -234,7 +258,17 @@ Msg *comm_read(int sock) {
 	dfs_out("read %d\n", res);
 	p += res;
     }
-
+    dfs_out("Read enc1\n");
+    if (encryption && hdr.len && igenc) {
+	char *out;
+	int out_sz;
+	dfs_out("Decrypting value\n");
+	cry_sym_init(session_key);
+	cry_sym_decrypt(&out, &out_sz, m + 1, res);
+	memcpy(m + 1, out, out_sz);
+	m->len = out_sz;
+	free(out);
+    }
     if (commStats) {
 	pthread_mutex_lock(&statsMut);
 	commStats->dataReceived += sizeof(Msg) + hdr.len;
@@ -248,7 +282,7 @@ Msg *comm_read(int sock) {
 
 
 // Varargs are char *, long, char *, long, 0   # MUST BE NULL-TERMINATED!
-int comm_send_prim(int sock, int type, int result, int seq, va_list ap) {
+int comm_send_prim(int igenc, int sock, int type, int result, int seq, va_list ap) {
     va_list		ap2;
     int			i = 0, num = 1, totallen = 0;
     struct iovec	*vecs;
@@ -269,18 +303,42 @@ int comm_send_prim(int sock, int type, int result, int seq, va_list ap) {
     m.res = result;
 
     vecs = (struct iovec *)malloc(sizeof(struct iovec) * num);
-    char* serialized;
-    size_t serialized_sz;
-    tuple_serialize_msg(&serialized, &serialized_sz, &m);
-    vecs[i].iov_base = serialized;
-    vecs[i++].iov_len = serialized_sz;
-
+    i = 1;
+    int total_sz = 0;
     while (data = va_arg(ap2, char *)) {
-	vecs[i].iov_base = data;
 	vecs[i++].iov_len = va_arg(ap2, int);
+	if (encryption && igenc) {
+	    dfs_out("Encrypting a field\n");
+	    char *out;
+	    int out_sz;
+	    cry_sym_init(session_key);
+	    cry_sym_encrypt(&out, &out_sz, data, vecs[i - 1].iov_len);
+	    data = out;
+	    vecs[i - 1].iov_len = out_sz;
+	}
+	total_sz += vecs[i - 1].iov_len;
+	vecs[i - 1].iov_base = data;
     }
     va_end(ap2);
-
+    char* serialized;
+    size_t serialized_sz;
+    m.len = total_sz;
+    if (encryption && igenc) {
+	dfs_out("Encrypting header\n");
+	char *out;
+	int out_sz;
+	tuple_serialize_msg(&serialized, &serialized_sz, &m);
+	dfs_out("tplhdr[%s]\n", serialized);
+	cry_sym_init(session_key);
+	cry_sym_encrypt(&out, &out_sz, serialized, serialized_sz);
+	vecs[0].iov_base = out;
+	vecs[0].iov_len = out_sz;
+    } else {
+	dfs_out("Making unencrypted header\n");
+	tuple_serialize_msg(&serialized, &serialized_sz, &m);
+	vecs[0].iov_base = serialized;
+	vecs[0].iov_len = serialized_sz;
+    }
     struct msghdr	mhdr;
     memset((char *)&mhdr, 0, sizeof(mhdr));
     mhdr.msg_iov = vecs;
@@ -301,6 +359,12 @@ int comm_send_prim(int sock, int type, int result, int seq, va_list ap) {
 	free(vecs);
 	return -1;
     }
+    int j;
+    if (encryption && igenc) {
+	for (j = 0; j < i; ++j) {
+	    free(vecs[j].iov_base);
+	}
+    }
     free(vecs);
     free(serialized);
     dfs_out("Sent msg type '%s' (res %d), %d bytes on %d, seq %d\n", messageStr(type), result, res, sock, m.seq);
@@ -309,11 +373,11 @@ int comm_send_prim(int sock, int type, int result, int seq, va_list ap) {
 
 
 // Varargs are char *, int, char *, int, 0   # MUST BE NULL-TERMINATED!
-int comm_send(int sock, int type, ...) {
+int comm_send(int igenc, int sock, int type, ...) {
     va_list		ap;
 
     va_start(ap, type);
-    int	res = comm_send_prim(sock, type, 0, sequenceNumber++, ap);
+    int	res = comm_send_prim(igenc, sock, type, 0, sequenceNumber++, ap);
     if (commStats) {
 	pthread_mutex_lock(&statsMut);
 	assert(type < numMsgTypes);
@@ -327,7 +391,7 @@ int comm_send(int sock, int type, ...) {
 
 
 // The incoming vector must have 
-int comm_sendmsg(int sock, int type, struct msghdr *min)
+int comm_sendmsg(int igenc, int sock, int type, struct msghdr *min)
 {
     int			i = 0;
     int			num = min->msg_iovlen + 1;
@@ -374,11 +438,11 @@ int comm_sendmsg(int sock, int type, struct msghdr *min)
 
 
 // Varargs are char *, int, char *, int, 0   # MUST BE NULL-TERMINATED!
-int comm_reply(int sock, Msg *m, int result, ...) {
+int comm_reply(int igenc, int sock, Msg *m, int result, ...) {
     va_list		ap;
 
     va_start(ap, result);
-    int	res = comm_send_prim(sock, MSG_REPLY, result, m->seq, ap);
+    int	res = comm_send_prim(igenc, sock, MSG_REPLY, result, m->seq, ap);
     va_end(ap);
 
     if (commStats) {
@@ -399,12 +463,12 @@ int comm_reply(int sock, Msg *m, int result, ...) {
 // with a single data segment as a payload, the signature for which an extent is needed. The signature is 
 // described by a data pointer and length. The following single NULL says that there is no more data.
 //
-Msg *comm_send_and_reply(int sock, int type, ...) 
+Msg *comm_send_and_reply(int igenc, int sock, int type, ...) 
 {
     va_list		ap;
 
     va_start(ap, type);
-    int	res = comm_send_prim(sock, type, 0, sequenceNumber++, ap);
+    int	res = comm_send_prim(igenc, sock, type, 0, sequenceNumber++, ap);
     va_end(ap);
 
     if (res < 0) return NULL;
@@ -416,10 +480,10 @@ Msg *comm_send_and_reply(int sock, int type, ...)
 	commStats->dataSent += res;
 	pthread_mutex_unlock(&statsMut);
     }
-    return comm_read(sock);
+    return comm_read(igenc, sock);
 }
 
-Msg *comm_send_and_reply_mutex(pthread_mutex_t *mut, pthread_cond_t *cond, int sock, int type, ...)
+Msg *comm_send_and_reply_mutex(int igenc, pthread_mutex_t *mut, pthread_cond_t *cond, int sock, int type, ...)
 {
     //willcompile
 
@@ -431,7 +495,7 @@ Msg *comm_send_and_reply_mutex(pthread_mutex_t *mut, pthread_cond_t *cond, int s
     Msg *reply;
     pthread_mutex_lock(&replyLogserverMut);
     va_start(ap, type);
-    int	res = comm_send_prim(sock, type, 0, sequenceNumber++, ap);
+    int	res = comm_send_prim(igenc, sock, type, 0, sequenceNumber++, ap);
     va_end(ap);
 
     if (res < 0) {

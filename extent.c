@@ -50,31 +50,31 @@ void *listener(void *arg)
     pthread_detach(pthread_self());
 
     Msg *m;
-    while (m = comm_read(c->fd)) {
+    while (m = comm_read(0, c->fd)) {
 	Extent		*ex;
 	char		*sig, *data;
 
 	switch (m->type) {
 	case DFS_MSG_GET_EXTENT:
 	    if (tuple_unserialize_sig(&sig, m->data, m->len))
-		comm_reply(c->fd, m, REPLY_ERR, NULL);
+		comm_reply(0, c->fd, m, REPLY_ERR, NULL);
 	    else if (ex = ex_get_extent(sig)) {
 		char	*buf;
 		size_t	sz;
 		tuple_serialize_extent(&buf, &sz, ex->data, ex->sz);
-		comm_reply(c->fd, m, REPLY_OK, buf, sz, NULL);
+		comm_reply(0, c->fd, m, REPLY_OK, buf, sz, NULL);
 		free(buf);
 	    } else
-		comm_reply(c->fd, m, REPLY_ERR, NULL);
+		comm_reply(0, c->fd, m, REPLY_ERR, NULL);
 	    break;
 
 	case DFS_MSG_POLL_EXTENT:
 	    if (tuple_unserialize_sig(&sig, m->data, m->len))
-		comm_reply(c->fd, m, REPLY_ERR, NULL);
+		comm_reply(0, c->fd, m, REPLY_ERR, NULL);
 	    else if (ex_poll_extent(sig))
-		comm_reply(c->fd, m, REPLY_OK, NULL);
+		comm_reply(0, c->fd, m, REPLY_OK, NULL);
 	    else
-		comm_reply(c->fd, m, REPLY_ERR, NULL);
+		comm_reply(0, c->fd, m, REPLY_ERR, NULL);
 	    break;
 
 	case DFS_MSG_PUT_EXTENT:
@@ -82,9 +82,9 @@ void *listener(void *arg)
 		size_t		sz;
 
 		if (tuple_unserialize_sig_extent(&sig, &data, &sz, m->data, m->len)) {
-		    comm_reply(c->fd, m, REPLY_ERR, NULL);
+		    comm_reply(0, c->fd, m, REPLY_ERR, NULL);
 		} else {
-		    comm_reply(c->fd, m, REPLY_OK, NULL);
+		    comm_reply(0, c->fd, m, REPLY_OK, NULL);
 		    ex_put_extent(data, sz);
 		    free(sig);
 		    free(data);

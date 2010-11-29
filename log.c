@@ -68,7 +68,7 @@ void pushLog(char *from, long len)
     char *serialized;
     size_t serialized_sz;  
     tuple_serialize_log(&serialized, &serialized_sz, from, len);
-    Msg *reply = comm_send_and_reply_mutex(&replyLogserverMut, &replyLogserverCond, opLog.net_fd, DFS_MSG_PUSH_LOG, serialized, serialized_sz, NULL);
+    Msg *reply = comm_send_and_reply_mutex(1, &replyLogserverMut, &replyLogserverCond, opLog.net_fd, DFS_MSG_PUSH_LOG, serialized, serialized_sz, NULL);
     pthread_mutex_lock(&treeMut);
     free(serialized);
     pending_change_id = -1;

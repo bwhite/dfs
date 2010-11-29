@@ -12,7 +12,8 @@ Client *my_clients;
 char my_serverprint[] = "FABBD729BCD7AAD7F557B494746E814136FD1A6A";
 char my_public_key[] = "(public-key (rsa (n #00A8642A89E77DCE76E04140CA45712493262E01CBA412E6F9CF16AA16F31BF0F6EA79244EA9D99978060217312473F6CC946E1F49FACB6D8542EA7581122B3E4C5DB4985963219773CD09362FBA67525C10E0BDA01A0490D41020CA3C80E346E3C5DCCDCB8A9A2C613243807C25DB672093DFC14D3E808632480057403B4EEDDB#) (e #010001#)))";
 char my_private_key[] = "(private-key (rsa (n #00A8642A89E77DCE76E04140CA45712493262E01CBA412E6F9CF16AA16F31BF0F6EA79244EA9D99978060217312473F6CC946E1F49FACB6D8542EA7581122B3E4C5DB4985963219773CD09362FBA67525C10E0BDA01A0490D41020CA3C80E346E3C5DCCDCB8A9A2C613243807C25DB672093DFC14D3E808632480057403B4EEDDB#)(e #010001#)(d #08647DA3993B06F2F12304C4A55E09E6F4EC8415B9DC0B5100B0EE274354982CE640C568CF99A87177F330B9629F63A48C9D49C7EE77A7176634B89DDC8C4A882A76C905038CD6A34B76A6F753F18822391BA9EB26CECC147ECB86E005D50F3B37825DBA5672D7E74247FA499E826F7B802DB87D14938EEB0685311E27983351#)(p #00CB74A0305B60EE9C801610F721A530229C1211FA591968A9DD74C12604ED261289D34F1CA9A332DC8A4267BAAD97DD139C4C66576E803BB4AD1AE2A061B0AF49#)(q #00D3E147BA1C531A294CA3F3DF4EE333B8AAA8F84972E9BA92BBFBDFA2EDFDB9C21A2F7D02197C3CC8479C358D1425E9FCB10BEC348F57FAF8E849B9DADCF5E003#)(u #7ACE3777A3C5DE550657BC19F4B462C4803DE86AA1878C895CFDB4E2F5780DDF7316EC424727FBF07892C4B9020E3D4FC76D6A88EB369A4765AC5EB6FBBDF448#)))";
-
+extern int encryption;
+extern char session_key[16];
 //=============================================================================
 
 
@@ -167,7 +168,8 @@ static void *listen_proc(void *arg)
     char server_nonce;
     // Stop auth vars
     Msg *m;
-    while (m = comm_read(c->fd)) {
+    int read_enc = 0;
+    while (m = comm_read(read_enc, c->fd)) {
 	Extent		*ex;
 	char		*sig, *data;
 	switch (m->type) {
@@ -181,7 +183,7 @@ static void *listen_proc(void *arg)
 	    char out_nonce = server_nonce;
 	    printf("Client said [O Hai!] along with this picture http://is.gd/hyjIm\n");
 	    printf("Lets give him a nonce[%d] and pk[%s]\n", (int)out_nonce, my_public_key);
-	    comm_reply(c->fd, m, REPLY_OK, &out_nonce, 1, my_public_key, strlen(my_public_key), NULL);
+	    comm_reply(0, c->fd, m, REPLY_OK, &out_nonce, 1, my_public_key, strlen(my_public_key), NULL);
 	  }
 	  break;
 	case DFS_TAKE_CHIT_SERVER:
@@ -199,6 +201,7 @@ static void *listen_proc(void *arg)
 	    char *chit_bundle;
 	    int chit_bundle_sz;
 	    printf("Sym Key[%x%x%x%x]\n", (sym), (sym + 4), (sym + 8), (sym + 12));
+	    memcpy(session_key, sym, 16);
 	    cry_sym_init(sym); // TODO May need to lock here for multiple clients
 	    cry_sym_decrypt(&chit_bundle, &chit_bundle_sz, encrypted_chit_bundle, encrypted_chit_bundle_sz);
 	    char c_client_nonce = chit_bundle[0];
@@ -212,9 +215,11 @@ static void *listen_proc(void *arg)
 	    printf("Incremented client[%d][%d]", (int)c_client_nonce, (int)out_nonce);
 	    char *out_nonce_encrypted;
 	    int out_nonce_encrypted_sz;
+	    cry_sym_init(session_key);
 	    cry_sym_encrypt(&out_nonce_encrypted, &out_nonce_encrypted_sz, &out_nonce, 1);
-	    comm_reply(c->fd, m, REPLY_OK, out_nonce_encrypted, out_nonce_encrypted_sz, NULL);
+	    comm_reply(0, c->fd, m, REPLY_OK, out_nonce_encrypted, out_nonce_encrypted_sz, NULL);
 	    auth_state = -1;
+	    read_enc = 1;
 	  }
 	  break;
 	case DFS_MSG_GET_LOG:
@@ -227,7 +232,7 @@ static void *listen_proc(void *arg)
 		  char *serialized;
 		  size_t serialized_sz;  
 		  tuple_serialize_log(&serialized, &serialized_sz, opLog.data, opLog.used);
-		  comm_reply(c->fd, m, REPLY_OK, serialized, serialized_sz, NULL);
+		  comm_reply(1, c->fd, m, REPLY_OK, serialized, serialized_sz, NULL);
 		  free(serialized);
 		}
 		pthread_mutex_unlock(&serverMut);
@@ -246,7 +251,7 @@ static void *listen_proc(void *arg)
 	      pthread_mutex_lock(&serverMut);
 	      dfs_out("Push locked\n");
 	      char *start, *stop;
-	      comm_reply(c->fd, m, REPLY_OK, NULL);
+	      comm_reply(1, c->fd, m, REPLY_OK, NULL);
 	      // Append to log
 	      ((LogHdr *)log)->id = ++opLog.id; // Forces all commits to be sequential
 	      dfs_out("Record gets id[%d]\n", opLog.id);
@@ -256,9 +261,14 @@ static void *listen_proc(void *arg)
 	      // flush to other clients
 	      Client *cur_c = my_clients;
 	      while(cur_c != NULL) {
+		  if (c == cur_c) {
+		      printf("Skipping current client\n");
+		      cur_c = cur_c->next;
+		      continue;
+		  }
 		dfs_out("Sending again[%p]...\n", cur_c);
 		// Send serialized version
-		comm_send(cur_c->fd, DFS_MSG_PUSH_LOG, m->data, m->len, NULL);
+		comm_send(1, cur_c->fd, DFS_MSG_PUSH_LOG, m->data, m->len, NULL);
 		cur_c = cur_c->next;
 	      }
 	      dfs_out("Done sending... Flushing server\n");
@@ -286,10 +296,13 @@ int main(int argc, char *argv[])
     char		*oname = NULL;
     int			port = LOG_PORT;
 
-    while ((c = getopt(argc, argv, "i:o:p:c")) != -1) {
+    while ((c = getopt(argc, argv, "i:o:p:ce")) != -1) {
 	switch (c) {
 	case 'i':
 	    iname = optarg;
+	    break;
+	case 'e':
+	    encryption = 1;
 	    break;
 	case 'o':
 	    oname = optarg;

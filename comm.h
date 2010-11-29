@@ -56,13 +56,13 @@ int 	comm_server_socket(int port);
 void 	comm_server_socket_mt(int port, void *(* listener)(void *));
 int	comm_client_socket(char *host, int port);
 
-Msg    *comm_read(int sock);
-int 	comm_send(int sock, int type, ...);
-Msg 	*comm_send_and_reply(int sock, int type, ...);
-int	comm_sendmsg(int sock, int type, struct msghdr *);
-int	comm_reply(int sock, Msg *m, int res, ...);
+Msg    *comm_read(int igenc, int sock);
+int 	comm_send(int igenc, int sock, int type, ...);
+Msg 	*comm_send_and_reply(int igenc, int sock, int type, ...);
+int	comm_sendmsg(int igenc, int sock, int type, struct msghdr *);
+int	comm_reply(int igenc, int sock, Msg *m, int res, ...);
 
-Msg 	*comm_send_and_reply_mutex(pthread_mutex_t *mut, pthread_cond_t *cond, int sock, int type, ...);
+Msg 	*comm_send_and_reply_mutex(int igenc, pthread_mutex_t *mut, pthread_cond_t *cond, int sock, int type, ...);
 
 void 	comm_register_msgtypes(int num, char **types);
 
