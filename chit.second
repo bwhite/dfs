@@ -1,0 +1,10 @@
+<chit>
+	<server>localhost</server>
+	<serverprint>FABBD729BCD7AAD7F557B494746E814136FD1A6A</serverprint>
+	<fingerprint>1207159D9CC832279973D98CCC3CAE9B14A14A70</fingerprint>
+	<id>1</id>
+	<version>1</version>
+	<tags>
+		<narrow>/foo</narrow>
+	</tags>
+</chit>
